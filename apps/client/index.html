@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MMO Spike</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #111; color: #ddd; font-family: system-ui, sans-serif; overflow: hidden; }
+      #app { position: absolute; inset: 0; }
+      #hud {
+        position: absolute; top: 8px; left: 8px;
+        background: rgba(0,0,0,0.6); padding: 8px 12px; border-radius: 4px;
+        font-size: 13px; pointer-events: none; line-height: 1.6;
+      }
+      #hud b { color: #fff; }
+      #hud .dim { color: #888; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">
+      <div><b>MMO Spike</b> <span class="dim">— tracer bullet</span></div>
+      <div id="status" class="dim">connecting…</div>
+      <div class="dim">Left-click ground: move &nbsp;·&nbsp; Left-click skeleton: attack</div>
+      <div class="dim">Add <code>?name=Bob</code> to URL for a second player</div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

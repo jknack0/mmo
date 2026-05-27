@@ -1,0 +1,3 @@
+# Click-to-move with Lost Ark-style skill bar
+
+Combat uses click-to-move (left mouse) combined with a Lost Ark-style 8-skill hotbar (QWERASDF) with real cooldowns, cast times, and animation lock. Right mouse is a no-cooldown primary weapon attack aimed at the cursor; spacebar is a dodge with i-frames. WASD movement was explicitly rejected — the game inherits D2's mouse-driven movement so positional play emerges from reading boss telegraphs and repositioning between casts, not from strafing while casting. Browser latency also makes click-to-move with server reconciliation a much more standard problem than WASD movement prediction.

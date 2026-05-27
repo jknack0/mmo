@@ -1,0 +1,3 @@
+# Shared persistent world with channels (Lost Ark-style), not lobby-based (D2-style)
+
+The project is a browser MMO inspired by Lost Ark and Diablo 2. We chose a Lost Ark-style shared persistent world — open zones are real shared spaces split into channels for density — rather than the simpler D2-style lobby + instanced games model. The shared overworld is the soul of the "MMO feel" we're targeting; instancing everything would deliver a co-op ARPG, not an MMO. We accept the cost: area-of-interest filtering, server-authoritative entity replication, channel switching, and a real game server are now required.

@@ -1,0 +1,3 @@
+# 2D fixed-camera isometric (sprite-based), not 3D
+
+Despite the Lost Ark inspiration, the game renders as 2D fixed-camera isometric with sprite sheets, targeting PixiJS-class browser rendering. The deciding factor for a solo developer is the art pipeline cost: 3D characters require modeling, rigging, and per-skill animation work that does not scale to one person, while 2D sprite assets are cheap, abundant, and battle-tested in the browser. We accept that some Lost Ark-style cinematic moments (dynamic camera, dramatic lighting) won't translate; the Lost Ark "feel" we keep is combat readability — telegraphs, particles, screen shake, damage numbers — all of which work in 2D.

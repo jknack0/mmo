@@ -1,0 +1,13 @@
+{
+  "name": "mmo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n gateway,channel,client -c blue,magenta,green \"pnpm --filter @mmo/server-gateway dev\" \"pnpm --filter @mmo/server-channel dev\" \"pnpm --filter @mmo/client dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
