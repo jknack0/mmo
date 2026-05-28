@@ -36,6 +36,8 @@ export interface MobState {
   hp: number;
   maxHp: number;
   alive: boolean;
+  /** Pyromancy Burn DoT stacks visible to the client. */
+  burnStacks?: number;
 }
 
 export interface ZoneSnapshot {
@@ -49,7 +51,8 @@ export interface ZoneSnapshot {
 export type ClientMessage =
   | { type: 'hello'; sessionToken: string; characterId: CharacterId; name: string }
   | { type: 'move'; target: Vec2 }
-  | { type: 'attack'; targetId: EntityId; skillId: SkillId };
+  | { type: 'attack'; targetId: EntityId; skillId: SkillId }
+  | { type: 'dodge' };
 
 // ─── Channel → Client ───────────────────────────────────────────
 
@@ -118,6 +121,8 @@ export function decodeClientMessage(raw: string): ClientMessage {
         throw new Error('protocol: malformed attack');
       }
       return { type: 'attack', targetId: parsed.targetId, skillId: parsed.skillId };
+    case 'dodge':
+      return { type: 'dodge' };
     default:
       throw new Error(`protocol: unknown client message type "${parsed.type}"`);
   }

@@ -43,6 +43,11 @@ describe('Protocol round-trip (JSON dev mode)', () => {
       ).toThrow();
     });
 
+    it('round-trips a Dodge message', () => {
+      const msg: ClientMessage = { type: 'dodge' };
+      expect(decodeClientMessage(encodeClientMessage(msg))).toEqual(msg);
+    });
+
     it('throws on a malformed payload', () => {
       expect(() => decodeClientMessage('{not json')).toThrow();
     });

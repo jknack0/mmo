@@ -17,6 +17,8 @@ import {
   setPlayerTarget,
   stepMovement,
   stepMobs,
+  stepBurns,
+  performDodge,
   snapshotZone,
   spawnMob,
   type ZoneState,
@@ -137,6 +139,10 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         }
         return;
       }
+      case 'dodge': {
+        performDodge(zone, conn.playerId, Date.now());
+        return;
+      }
       case 'hello':
         return;
     }
@@ -156,6 +162,10 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       for (const ev of events) {
         broadcast({ type: 'damage', event: ev });
       }
+    }
+    // Burn DoT — ticks once per second per active stack-set.
+    for (const ev of stepBurns(zone, now)) {
+      broadcast({ type: 'damage', event: ev });
     }
     stepMovement(zone, dtSec);
     stepMobs(zone, now);

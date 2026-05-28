@@ -286,13 +286,18 @@ export async function mountWorldScene(
     }
   });
 
-  // ─── Hotkeys: Q = Spark, R = Pyroclasm ──────────────────────
-  // Press a hotkey to engage the current sticky target with that skill,
-  // or — if no current target — engage the closest alive mob in skill range.
-  // Resource and cooldown gates are enforced server-side.
+  // ─── 6-slot hotbar ──────────────────────────────────────────
+  // Per ADR-0003 (amended) the alpha hotbar has 6 keys. Hardcoded loadout
+  // showcases both Pyromancy sub-archetypes (burn-stacker via cinder-spray
+  // → combust; direct-burst via spark / fireball / meteor / pyroclasm).
+  // Configurable bindings + drag-bind UI land in S09 (#11) with tripods.
   const SKILL_KEYBINDS: Record<string, string> = {
     q: 'spark',
+    w: 'cinder-spray',
+    e: 'fireball',
     r: 'pyroclasm',
+    a: 'combust',
+    s: 'meteor',
   };
   function castSkillByHotkey(skillId: string): void {
     if (!myId) return;
@@ -316,6 +321,11 @@ export async function mountWorldScene(
     client.send({ type: 'attack', targetId, skillId });
   }
   function onKeyDown(e: KeyboardEvent): void {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      client.send({ type: 'dodge' });
+      return;
+    }
     const skill = SKILL_KEYBINDS[e.key.toLowerCase()];
     if (skill) castSkillByHotkey(skill);
   }
