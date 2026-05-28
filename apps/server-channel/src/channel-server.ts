@@ -23,6 +23,7 @@ import {
   type MobSpawnInput,
 } from './zone/zone-state.js';
 import { engageTarget, advancePlayerCombat } from './combat/combat-system.js';
+import { stepResources } from './resources/resource-system.js';
 
 interface Connection {
   ws: WebSocket;
@@ -143,6 +144,11 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
 
   function tick(): void {
     const now = Date.now();
+    // Resources advance every tick — done first so any spends inside the
+    // FSM step see the updated values.
+    for (const player of zone.players.values()) {
+      stepResources(player.resources, dtSec, now);
+    }
     // Sticky-attack FSM runs BEFORE movement so the FSM's player.target
     // assignment (when chasing) is what MovementSystem consumes this tick.
     for (const player of zone.players.values()) {

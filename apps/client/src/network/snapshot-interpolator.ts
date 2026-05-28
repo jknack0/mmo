@@ -10,6 +10,10 @@ export interface InterpolatedPlayerState {
   name: string;
   pos: Vec2;
   engagedTargetId: string | null;
+  spirit: number;
+  maxSpirit: number;
+  wrath: number;
+  maxWrath: number;
 }
 
 export interface InterpolatedMobState {
@@ -44,6 +48,10 @@ interface TrackedPlayer {
   target: Vec2;
   render: Vec2;
   engagedTargetId: string | null;
+  spirit: number;
+  maxSpirit: number;
+  wrath: number;
+  maxWrath: number;
 }
 
 interface TrackedMob {
@@ -71,6 +79,10 @@ export function createSnapshotInterpolator(
           existing.target = { ...p.pos };
           existing.name = p.name;
           existing.engagedTargetId = p.engagedTargetId ?? null;
+          existing.spirit = p.spirit ?? existing.spirit;
+          existing.maxSpirit = p.maxSpirit ?? existing.maxSpirit;
+          existing.wrath = p.wrath ?? existing.wrath;
+          existing.maxWrath = p.maxWrath ?? existing.maxWrath;
         } else {
           players.set(p.id, {
             characterId: p.characterId,
@@ -78,6 +90,10 @@ export function createSnapshotInterpolator(
             target: { ...p.pos },
             render: { ...p.pos },
             engagedTargetId: p.engagedTargetId ?? null,
+            spirit: p.spirit ?? 100,
+            maxSpirit: p.maxSpirit ?? 100,
+            wrath: p.wrath ?? 0,
+            maxWrath: p.maxWrath ?? 100,
           });
         }
       }
@@ -120,6 +136,10 @@ export function createSnapshotInterpolator(
           name: t.name,
           pos: { x: t.render.x, y: t.render.y },
           engagedTargetId: t.engagedTargetId,
+          spirit: t.spirit,
+          maxSpirit: t.maxSpirit,
+          wrath: t.wrath,
+          maxWrath: t.maxWrath,
         });
       }
       const outMobs: InterpolatedMobState[] = [];

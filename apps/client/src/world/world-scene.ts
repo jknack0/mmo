@@ -18,6 +18,15 @@ export interface MountWorldSceneOptions {
   characterId: string;
   characterName: string;
   onDisconnected?: () => void;
+  /** Called every frame with the local player's live stats for HUD rendering. */
+  onStats?: (s: LocalPlayerStats) => void;
+}
+
+export interface LocalPlayerStats {
+  spirit: number;
+  maxSpirit: number;
+  wrath: number;
+  maxWrath: number;
 }
 
 export type WorldSceneCleanup = () => void;
@@ -277,10 +286,49 @@ export async function mountWorldScene(
     }
   });
 
+  // ─── Hotkeys: Q = Spark, R = Pyroclasm ──────────────────────
+  // Press a hotkey to engage the current sticky target with that skill,
+  // or — if no current target — engage the closest alive mob in skill range.
+  // Resource and cooldown gates are enforced server-side.
+  const SKILL_KEYBINDS: Record<string, string> = {
+    q: 'spark',
+    r: 'pyroclasm',
+  };
+  function castSkillByHotkey(skillId: string): void {
+    if (!myId) return;
+    const me = lastFrame.players.find((p) => p.id === myId);
+    if (!me) return;
+    let targetId = me.engagedTargetId ?? null;
+    if (!targetId) {
+      // Pick the nearest alive mob — server will reject if out of range.
+      let bestDist = Infinity;
+      for (const mob of aliveMobsByTile.values()) {
+        const dx = mob.pos.x - me.pos.x;
+        const dy = mob.pos.y - me.pos.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < bestDist) {
+          bestDist = d;
+          targetId = mob.id;
+        }
+      }
+    }
+    if (!targetId) return;
+    client.send({ type: 'attack', targetId, skillId });
+  }
+  function onKeyDown(e: KeyboardEvent): void {
+    const skill = SKILL_KEYBINDS[e.key.toLowerCase()];
+    if (skill) castSkillByHotkey(skill);
+  }
+  window.addEventListener('keydown', onKeyDown);
+
+  // Frame cache so hotkey handlers don't need to re-run the interpolator.
+  let lastFrame: ReturnType<typeof interp.interpolate> = { players: [], mobs: [] };
+
   // ─── Render loop ──────────────────────────────────────────────
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS / 1000;
     const frame = interp.interpolate(dt);
+    lastFrame = frame;
 
     // Players
     const seenP = new Set<string>();
@@ -359,6 +407,7 @@ export async function mountWorldScene(
     unsubStatus();
     client.close();
     window.removeEventListener('resize', onResize);
+    window.removeEventListener('keydown', onKeyDown);
     app.destroy(true, { children: true });
   };
 }
