@@ -11,6 +11,8 @@ import { createSessionStore } from '../auth/session-store.js';
 import { createPasswordHasher } from '../auth/password-hasher.js';
 import { createAuthService } from '../auth/auth-service.js';
 import type { DiscordClient, DiscordUser } from '../auth/types.js';
+import { createCharacterRepo } from '../character/character-repo.js';
+import { createCharacterService } from '../character/character-service.js';
 import { buildGatewayServer } from './server.js';
 
 function makeDiscordClient(user: DiscordUser): DiscordClient {
@@ -42,7 +44,14 @@ describe('Auth HTTP routes', () => {
       passwordMinLength: 8,
       redis,
     });
-    server = buildGatewayServer({ auth, clientOrigin: 'http://localhost:5173' });
+    const characters = createCharacterService({
+      characterRepo: createCharacterRepo(db),
+    });
+    server = buildGatewayServer({
+      auth,
+      characters,
+      clientOrigin: 'http://localhost:5173',
+    });
     await new Promise<void>((resolve) => server.listen(0, resolve));
     const addr = server.address() as AddressInfo;
     url = `http://127.0.0.1:${addr.port}`;
