@@ -1,58 +1,8 @@
-// SPIKE: Gateway service.
-// Real role per ADR-0011: handles auth/lobby/character-select/channel-routing.
-// In the spike: a single HTTP endpoint that hands back the (only) channel's WS URL.
+// Placeholder. Real Gateway implementation lands in S01 (#3): Discord OAuth +
+// email/bcrypt fallback + accounts table + session tokens in Redis.
+// Channel routing arrives in S04 (#6). Handshake endpoint in S03 (#5).
 
-import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
-import type { GatewayConnectResponse } from '@mmo/protocol';
+console.log('[gateway] placeholder — implementation tracked at https://github.com/jknack0/mmo/issues/3');
 
-const PORT = 8080;
-const CHANNEL_URL = process.env.CHANNEL_URL ?? 'ws://localhost:8081';
-
-const server = createServer((req, res) => {
-  // CORS for local dev — client runs on 5173, gateway on 8080.
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-
-  const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
-
-  if (url.pathname === '/connect' && req.method === 'GET') {
-    const name = url.searchParams.get('name') ?? 'Anon';
-    const playerId = randomUUID();
-    const token = randomUUID(); // SPIKE: not validated by channel beyond existence.
-
-    const body: GatewayConnectResponse = {
-      channelUrl: CHANNEL_URL,
-      playerId,
-      token,
-    };
-
-    console.log(`[gateway] handshake name=${name} playerId=${playerId}`);
-
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(body));
-    return;
-  }
-
-  if (url.pathname === '/health') {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('ok');
-    return;
-  }
-
-  res.writeHead(404);
-  res.end('not found');
-});
-
-server.listen(PORT, () => {
-  console.log(`[gateway] listening on http://localhost:${PORT}`);
-  console.log(`[gateway] handshake endpoint: GET /connect?name=<displayName>`);
-  console.log(`[gateway] will route to channel: ${CHANNEL_URL}`);
-});
+// Keep the process alive so `pnpm dev` composes.
+setInterval(() => {}, 1 << 30);
