@@ -41,7 +41,7 @@ describe('Character HTTP routes', () => {
     const characters = createCharacterService({
       characterRepo: createCharacterRepo(db),
     });
-    server = buildGatewayServer({
+    server = buildGatewayServer({ redis,
       auth,
       characters,
       clientOrigin: 'http://localhost:5173',

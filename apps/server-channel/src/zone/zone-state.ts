@@ -15,6 +15,7 @@ export type PlayerAttackState =
   | { kind: 'in-range-attacking'; targetId: EntityId; skillId: SkillId };
 
 import type { ResourceState } from '../resources/resource-system.js';
+import type { PlayerTripodLoadout } from '../combat/tripods.js';
 
 export interface ServerPlayer {
   id: PlayerId;
@@ -32,6 +33,8 @@ export interface ServerPlayer {
   resources: ResourceState;
   /** Wall-clock ms when this player's dodge i-frame window ends. */
   dodgeInvulUntil: number;
+  /** Tripod selections per skill (per ADR-0018). Default {} = base skill. */
+  tripods: PlayerTripodLoadout;
 }
 
 export interface ServerMob {
@@ -69,6 +72,7 @@ export interface PlayerSpawnInput {
   name: string;
   pos?: Vec2;
   speed?: number;
+  tripods?: PlayerTripodLoadout;
 }
 
 export interface MobSpawnInput {
@@ -115,6 +119,7 @@ export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPla
       maxWrath: DEFAULT_MAX_WRATH,
     }),
     dodgeInvulUntil: 0,
+    tripods: input.tripods ?? {},
   };
   zone.players.set(input.id, player);
   return player;

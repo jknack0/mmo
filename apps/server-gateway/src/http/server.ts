@@ -2,11 +2,18 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import type { AuthService } from '../auth/auth-service.js';
 import type { AuthError } from '../auth/types.js';
 import type { CharacterService, CharacterError } from '../character/character-service.js';
+import type { RedisClient } from '../redis/client.js';
 import { requireAccount } from './require-account.js';
+import {
+  loadTripods,
+  saveTripods,
+  validateLoadout,
+} from '../tripod/tripod-store.js';
 
 export interface GatewayServerOptions {
   auth: AuthService;
   characters: CharacterService;
+  redis: RedisClient;
   /** Origin the client SPA is served from. Discord callback redirects here. */
   clientOrigin: string;
   /** WS URL of the single hardcoded channel (until S04 wires ChannelRouter). */
@@ -29,10 +36,11 @@ const CHARACTER_ERROR_STATUS: Record<CharacterError, number> = {
 };
 
 const PLAY_PATH = /^\/characters\/([0-9a-f-]{36})\/play$/;
+const TRIPOD_PATH = /^\/characters\/([0-9a-f-]{36})\/tripods$/;
 
 function setCors(res: ServerResponse, origin: string): void {
   res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'content-type, authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 }
@@ -58,7 +66,7 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 }
 
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
-  const { auth, characters, clientOrigin, channelWsUrl } = opts;
+  const { auth, characters, clientOrigin, channelWsUrl, redis } = opts;
 
   return createServer(async (req, res) => {
     try {
@@ -221,6 +229,33 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           sendJson(res, 200, { character });
           return;
         }
+      }
+
+      // ─── GET/PUT /characters/:id/tripods ──────────────────────
+      const tripodMatch = TRIPOD_PATH.exec(url.pathname);
+      if (tripodMatch && (req.method === 'GET' || req.method === 'PUT')) {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const characterId = tripodMatch[1]!;
+        const character = await characters.loadCharacter(session.accountId, characterId);
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        if (req.method === 'GET') {
+          const loadout = await loadTripods(redis, characterId);
+          sendJson(res, 200, { loadout });
+          return;
+        }
+        // PUT
+        const body = await readJsonBody<{ loadout?: unknown }>(req);
+        if (!validateLoadout(body.loadout)) {
+          sendJson(res, 400, { error: 'invalid-loadout' });
+          return;
+        }
+        await saveTripods(redis, characterId, body.loadout);
+        sendJson(res, 200, { loadout: body.loadout });
+        return;
       }
 
       // ─── GET /health ──────────────────────────────────────────

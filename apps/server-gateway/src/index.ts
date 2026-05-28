@@ -41,6 +41,7 @@ async function main(): Promise<void> {
   const server = buildGatewayServer({
     auth,
     characters,
+    redis,
     clientOrigin: CLIENT_ORIGIN,
     channelWsUrl: CHANNEL_WS_URL,
   });
