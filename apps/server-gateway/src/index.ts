@@ -1,8 +1,60 @@
-// Placeholder. Real Gateway implementation lands in S01 (#3): Discord OAuth +
-// email/bcrypt fallback + accounts table + session tokens in Redis.
-// Channel routing arrives in S04 (#6). Handshake endpoint in S03 (#5).
+// Gateway bootstrap. Wires the deep modules and starts the HTTP listener.
+// Implements S01 (#3): auth endpoints. Channel routing comes in S04 (#6).
 
-console.log('[gateway] placeholder — implementation tracked at https://github.com/jknack0/mmo/issues/3');
+import { env } from './env.js';
+import { createDb } from './db/client.js';
+import { createRedis } from './redis/client.js';
+import { createAccountRepo } from './auth/account-repo.js';
+import { createSessionStore } from './auth/session-store.js';
+import { createPasswordHasher } from './auth/password-hasher.js';
+import { createDiscordClient } from './auth/discord-client.js';
+import { createAuthService } from './auth/auth-service.js';
+import { buildGatewayServer } from './http/server.js';
 
-// Keep the process alive so `pnpm dev` composes.
-setInterval(() => {}, 1 << 30);
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
+
+async function main(): Promise<void> {
+  const db = createDb(env.databaseUrl);
+  const redis = createRedis(env.redisUrl);
+
+  const auth = createAuthService({
+    accountRepo: createAccountRepo(db),
+    sessionStore: createSessionStore({ redis, ttlSeconds: env.sessionTtlSeconds }),
+    passwordHasher: createPasswordHasher({ rounds: env.bcryptRounds }),
+    discordClient: createDiscordClient({
+      clientId: env.discord.clientId,
+      clientSecret: env.discord.clientSecret,
+      redirectUrl: env.discord.redirectUrl,
+    }),
+    discord: env.discord,
+    passwordMinLength: 8,
+    redis,
+  });
+
+  const server = buildGatewayServer({ auth, clientOrigin: CLIENT_ORIGIN });
+  server.listen(env.gatewayPort, () => {
+    console.log(`[gateway] listening on http://localhost:${env.gatewayPort}`);
+    console.log(`[gateway] client origin: ${CLIENT_ORIGIN}`);
+    if (!env.discord.clientId || !env.discord.clientSecret) {
+      console.warn(
+        '[gateway] Discord OAuth not configured — set DISCORD_CLIENT_ID + DISCORD_CLIENT_SECRET in .env to enable.'
+      );
+    }
+  });
+
+  // Clean shutdown.
+  const shutdown = async () => {
+    console.log('[gateway] shutting down…');
+    server.close();
+    await redis.quit();
+    await db.destroy();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+main().catch((err) => {
+  console.error('[gateway] fatal:', err);
+  process.exit(1);
+});
