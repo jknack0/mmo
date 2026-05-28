@@ -14,6 +14,8 @@ export type PlayerAttackState =
   | { kind: 'chasing'; targetId: EntityId; skillId: SkillId }
   | { kind: 'in-range-attacking'; targetId: EntityId; skillId: SkillId };
 
+import type { ResourceState } from '../resources/resource-system.js';
+
 export interface ServerPlayer {
   id: PlayerId;
   characterId: CharacterId;
@@ -26,6 +28,8 @@ export interface ServerPlayer {
   cooldowns: Map<SkillId, number>;
   /** Sticky-attack-target FSM per PROTOTYPE_NOTES.md lesson #1. */
   attackState: PlayerAttackState;
+  /** Spirit + Wrath resources per ADR-0010. */
+  resources: ResourceState;
 }
 
 export interface ServerMob {
@@ -65,8 +69,12 @@ export interface MobSpawnInput {
   respawnMs?: number;
 }
 
+import { createResourceState } from '../resources/resource-system.js';
+
 const DEFAULT_SPEED_TILES_PER_SEC = 4;
 const DEFAULT_RESPAWN_MS = 5_000;
+const DEFAULT_MAX_SPIRIT = 100;
+const DEFAULT_MAX_WRATH = 100;
 
 export function createZoneState(opts: { size: Vec2; tileMap: number[][] }): ZoneState {
   return {
@@ -92,6 +100,10 @@ export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPla
     speed: input.speed ?? DEFAULT_SPEED_TILES_PER_SEC,
     cooldowns: new Map(),
     attackState: { kind: 'idle' },
+    resources: createResourceState({
+      maxSpirit: DEFAULT_MAX_SPIRIT,
+      maxWrath: DEFAULT_MAX_WRATH,
+    }),
   };
   zone.players.set(input.id, player);
   return player;
@@ -220,6 +232,10 @@ export function snapshotZone(zone: ZoneState): ZoneSnapshot {
       name: p.name,
       pos: { ...p.pos },
       engagedTargetId: engaged,
+      spirit: p.resources.spirit,
+      maxSpirit: p.resources.maxSpirit,
+      wrath: p.resources.wrath,
+      maxWrath: p.resources.maxWrath,
     });
   }
   const mobs: MobState[] = [];

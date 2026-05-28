@@ -1,22 +1,35 @@
 // Server-authoritative combat. Per-skill cooldown timestamp map (per
 // PROTOTYPE_NOTES.md lesson #2 — generalised from the spike's global
 // attack-rate clamp), range validation, damage application, sticky
-// attack-target FSM (per PROTOTYPE_NOTES.md lesson #1).
+// attack-target FSM (per PROTOTYPE_NOTES.md lesson #1), Spirit/Wrath
+// resource gating (ADR-0010).
 
 import type { PlayerId, EntityId, SkillId, DamageEvent } from '@mmo/protocol';
 import { damageMob, type ZoneState } from '../zone/zone-state.js';
+import {
+  onDamageDealt,
+  spendSpirit,
+  spendWrath,
+} from '../resources/resource-system.js';
 
 export interface SkillDef {
   id: SkillId;
   cooldownMs: number;
   rangeTiles: number;
   damage: number;
+  /** ADR-0010: most skills cost Spirit; a few elite skills cost Wrath. */
+  spiritCost: number;
+  wrathCost: number;
 }
 
 /**
  * Mutable registry so tests can introduce additional skills without
  * rewiring the import graph. Real builds load these from a data file in
  * `packages/domain/DisciplineSchema` (S08 #10).
+ *
+ * basic-attack — free right-mouse weapon attack, the spammable filler.
+ * spark        — Pyromancy first skill: cheap, fast, projectile.
+ * pyroclasm    — Pyromancy elite: massive damage, full-Wrath gate.
  */
 export const SKILL_DEFS: Record<SkillId, SkillDef> = {
   'basic-attack': {
@@ -24,6 +37,24 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     cooldownMs: 500,
     rangeTiles: 2,
     damage: 12,
+    spiritCost: 0,
+    wrathCost: 0,
+  },
+  spark: {
+    id: 'spark',
+    cooldownMs: 350,
+    rangeTiles: 8,
+    damage: 10,
+    spiritCost: 8,
+    wrathCost: 0,
+  },
+  pyroclasm: {
+    id: 'pyroclasm',
+    cooldownMs: 5_000,
+    rangeTiles: 4,
+    damage: 80,
+    spiritCost: 0,
+    wrathCost: 100,
   },
 };
 
@@ -37,7 +68,9 @@ export type AttackOutcome =
         | 'target-missing'
         | 'target-dead'
         | 'out-of-range'
-        | 'on-cooldown';
+        | 'on-cooldown'
+        | 'no-spirit'
+        | 'no-wrath';
     };
 
 function tileDistance(a: { x: number; y: number }, b: { x: number; y: number }): number {
@@ -70,8 +103,18 @@ export function attemptAttack(
   const expires = attacker.cooldowns.get(skillId) ?? 0;
   if (nowMs < expires) return { ok: false, reason: 'on-cooldown' };
 
+  if (def.spiritCost > 0 && attacker.resources.spirit < def.spiritCost) {
+    return { ok: false, reason: 'no-spirit' };
+  }
+  if (def.wrathCost > 0 && attacker.resources.wrath < def.wrathCost) {
+    return { ok: false, reason: 'no-wrath' };
+  }
+  if (def.spiritCost > 0) spendSpirit(attacker.resources, def.spiritCost);
+  if (def.wrathCost > 0) spendWrath(attacker.resources, def.wrathCost);
+
   const { fatal, applied } = damageMob(zone, targetId, def.damage, nowMs);
   attacker.cooldowns.set(skillId, nowMs + def.cooldownMs);
+  onDamageDealt(attacker.resources, applied, nowMs);
   return { ok: true, damage: applied, fatal };
 }
 
@@ -107,14 +150,6 @@ export function disengage(zone: ZoneState, playerId: PlayerId): void {
  * Drive one tick of the player's attack FSM. Returns any Damage events
  * fired during this tick (zero or one for now — multi-target skills can
  * return more later).
- *
- * Transitions:
- *   idle: no-op
- *   chasing target alive in range: → in-range-attacking, stand still
- *   chasing target alive out of range: stay chasing, set player.target = mob.pos
- *   in-range-attacking target alive out of range: → chasing
- *   in-range-attacking + cooldown ready: fire skill, stay in-range-attacking
- *   target dead or missing: → idle, clear chase target
  */
 export function advancePlayerCombat(
   zone: ZoneState,
@@ -162,8 +197,16 @@ export function advancePlayerCombat(
   const expires = player.cooldowns.get(state.skillId) ?? 0;
   if (nowMs < expires) return [];
 
+  // Resource gate. If the player can't pay, skip this tick — they'll
+  // try again next tick once regen catches up.
+  if (skill.spiritCost > 0 && player.resources.spirit < skill.spiritCost) return [];
+  if (skill.wrathCost > 0 && player.resources.wrath < skill.wrathCost) return [];
+  if (skill.spiritCost > 0) spendSpirit(player.resources, skill.spiritCost);
+  if (skill.wrathCost > 0) spendWrath(player.resources, skill.wrathCost);
+
   const { fatal, applied } = damageMob(zone, state.targetId, skill.damage, nowMs);
   player.cooldowns.set(state.skillId, nowMs + skill.cooldownMs);
+  onDamageDealt(player.resources, applied, nowMs);
   return [
     {
       targetId: state.targetId,

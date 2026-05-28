@@ -21,6 +21,12 @@ export interface PlayerState {
   pos: Vec2;
   /** Target this player is currently sticky-attacking, if any. */
   engagedTargetId: EntityId | null;
+  /** ADR-0010: fast-regenerating spam resource. */
+  spirit: number;
+  maxSpirit: number;
+  /** ADR-0010: combat-built ultimate resource. */
+  wrath: number;
+  maxWrath: number;
 }
 
 export interface MobState {
