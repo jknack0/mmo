@@ -16,13 +16,14 @@ Open `http://localhost:5173/?name=Alice` and `http://localhost:5173/?name=Bob` i
 
 **Read in this order to get oriented:**
 1. [`CONTEXT.md`](./CONTEXT.md) — domain glossary, the project-specific language
-2. [`docs/adr/`](./docs/adr/) — the 16 ADRs covering every locked decision and why
+2. [`docs/adr/`](./docs/adr/) — the 18 ADRs covering every locked decision and why
+2b. [`docs/prd/alpha-vertical-slice.md`](./docs/prd/alpha-vertical-slice.md) — alpha PRD (also at [issue #1](https://github.com/jknack0/mmo/issues/1))
 3. [`PROTOTYPE_NOTES.md`](./PROTOTYPE_NOTES.md) — the spike's verdict and engineering lessons
 4. This file — what's still open
 
 ---
 
-## ✅ Locked (16 ADRs)
+## ✅ Locked (18 ADRs)
 
 | # | Decision | One-line summary |
 |---|---|---|
@@ -42,22 +43,18 @@ Open `http://localhost:5173/?name=Alice` and `http://localhost:5173/?name=Bob` i
 | [0014](./docs/adr/0014-visual-art-direction.md) | Dark gothic art | D2-dark backgrounds + vivid VFX; hand-painted sprites |
 | [0015](./docs/adr/0015-setting-post-sundering-dying-world.md) | Setting | Vael, post-Sundering, Awakened, Hold Veridian, the Veil |
 | [0016](./docs/adr/0016-social-systems-modern-bar-guild-light.md) | Social | Modern bar (party, friends, mail, chat, finder); guild-light Orders |
+| [0017](./docs/adr/0017-monetization-f2p-cosmetic-only-no-power.md) | Monetization | F2P launch; cosmetic-only shop + optional Patreon; AH 5% gold sink; no power/convenience/time/loot boxes/sub/BP |
+| [0018](./docs/adr/0018-discipline-skill-design-template.md) | Discipline template | 12 skills (1·3·3·2·1·2 anatomy), 6 of 24 free-pick, tripod T1=vector / T2=archetype, 20-node tree (2 root + 3 paths × 6), 20 shared passive points |
+
+Pyromancy is the canonical worked example: [`docs/disciplines/pyromancy.md`](./docs/disciplines/pyromancy.md). All 6 discipline names + identities + archetype paths locked: [`docs/disciplines/README.md`](./docs/disciplines/README.md).
 
 ---
 
 ## 🔁 Open grilling threads
 
-### Mid-conversation — already proposed, awaiting decision
-
-- **Q18 — Monetization** *(proposed but not locked)*
-  - Proposal: free during alpha/beta → at launch, F2P + cosmetic-only cash shop + optional Patreon
-  - Explicit no's: power, convenience, time saves, loot boxes, subscriptions, battle pass
-  - AH 5% gold fee as in-game sink
-  - **Decision needed before locking ADR**
-
 ### Not yet started
 
-- **Discipline skill design** — pick one discipline (probably Pyromancy) and enumerate all 12 skills + tripod choices + passive tree as a worked example. This gives a template the others can follow.
+- **Full skill slates for the other 5 disciplines** — Cryomancy, Blademaster, Marksman, Sentinel, Shadowblade. Each follows the ADR-0018 template (12 skills + tripods + 20-node tree). Deferrable to implementation phase — only Pyromancy needs locking before to-prd / to-issues.
 - **Zone authoring tooling** — what tools do we need to build zones efficiently? Tile editor? JSON-authored zones? Spreadsheet-imported mob spawn tables? Determines content-creation velocity.
 - **Anything else you want to grill** — quest system design, NPC dialogue/branching, achievement system, telemetry/analytics philosophy, dev tools, content cadence post-launch, etc.
 
@@ -93,10 +90,10 @@ These have ADRs or glossary entries that *name* them but punt the design. Don't 
 
 The order is roughly:
 
-1. Finish remaining grilling threads (monetization → disciplines → tooling → anything else)
-2. `to-prd` — compile design into a PRD published to the issue tracker
-3. `to-issues` — break the PRD into tracer-bullet vertical-slice tickets
-4. **Delete the spike** (`apps/server-gateway/src/index.ts`, `apps/server-channel/src/index.ts`, `apps/client/src/main.ts`) and start the real implementation from those tickets
+1. ~~Finish remaining grilling threads (monetization → disciplines → tooling → anything else)~~ ✅ Pyromancy + 6-discipline lineup + monetization locked. Other 5 disc slates + zone tooling deferred to post-alpha.
+2. ~~`to-prd` — compile design into a PRD published to the issue tracker~~ ✅ [`docs/prd/alpha-vertical-slice.md`](./docs/prd/alpha-vertical-slice.md) + [issue #1](https://github.com/jknack0/mmo/issues/1)
+3. ~~`to-issues` — break the alpha PRD into tracer-bullet vertical-slice tickets~~ ✅ 28 issues #2–#29, all `ready-for-agent`. Dep chain: S00 (#2) → S01 (#3, HITL) → … → S27 (#29).
+4. **Start implementation at [S00 (#2)](https://github.com/jknack0/mmo/issues/2)** — delete spike `src/index.ts` files + scaffold `packages/domain` + wire Vitest/Playwright. Then walk down the dependency chain. ← **NEXT**
 5. Build, iterate, alpha
 
 The pnpm workspace skeleton, tsconfigs, and `packages/protocol` *do* survive past the spike — only the `src/index.ts` files in each app are throwaway.
@@ -110,7 +107,10 @@ mmo/
 ├── CONTEXT.md             ← domain glossary
 ├── PROTOTYPE_NOTES.md     ← spike verdict + lessons
 ├── NEXT_STEPS.md          ← this file
-├── docs/adr/              ← 16 ADRs, the locked decisions
+├── docs/
+│   ├── adr/               ← 18 ADRs, the locked decisions
+│   ├── disciplines/       ← Pyromancy worked example + 6-disc overview
+│   └── prd/               ← PRDs (alpha vertical slice locked)
 ├── apps/
 │   ├── client/            ← spike: PixiJS iso client (throwaway src)
 │   ├── server-gateway/    ← spike: HTTP handshake (throwaway src)
@@ -120,3 +120,5 @@ mmo/
 ├── .claude/launch.json    ← preview tool config (committed)
 └── pnpm-workspace.yaml    ← workspace setup
 ```
+
+The packages dir will grow with `packages/domain` (per ADR-0012) when alpha implementation starts.

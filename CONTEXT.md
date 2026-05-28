@@ -23,7 +23,7 @@ _Avoid_: Overworld, public zone
 ### Character build
 
 **Discipline**:
-A themed skill set learned from a trainer (e.g., Pyromancy, Blademaster). The replacement for "class." Each character has exactly 2 equipped disciplines.
+A themed skill set learned from a trainer. The replacement for "class." Each character has exactly 2 equipped disciplines. The six launch disciplines are **Pyromancy** (INT ranged, Fire/Burn burst-AoE caster), **Cryomancy** (INT ranged, Cold/Frostbite control caster), **Blademaster** (STR melee, Physical/Bleed sustain DPS), **Marksman** (DEX ranged, Physical precision archer), **Sentinel** (STR/VIT melee, Physical defender / tank), and **Shadowblade** (DEX melee, Physical/Poison stealth assassin). All six follow the design template in ADR-0018. See [`/docs/disciplines/`](../docs/disciplines/) for full reference.
 _Avoid_: Class, school, profession, job
 
 **Trainer**:
@@ -106,8 +106,20 @@ Boosts magic damage and Spirit pool size. Gates caster off-hands and robes.
 Boosts HP and Spirit regen rate. Gates no gear (universally desirable, opportunity cost is missing damage-flavor stats).
 
 **Damage type**:
-A tag carried by skills and by item affixes (Fire, Cold, Physical, Bleed, etc.). Damage-type-flavored affixes ("+15% Fire damage") are the primary build-defining item affix, not raw primary stats.
+A tag carried by skills and by item affixes (Fire, Cold, Physical, Bleed, Burn, etc.). Damage-type-flavored affixes ("+15% Fire damage") are the primary build-defining item affix, not raw primary stats.
 _Avoid_: Element, school
+
+**Burn**:
+A damage-over-time damage type, the Fire-flavored counterpart to Bleed. Applied by some Pyromancy skills as stacking debuffs that tick Fire damage over time. Affixes scale Burn damage and Burn duration independently of base Fire damage, enabling a "burn-stacker" archetype distinct from a "fireball-nuker" archetype within Pyromancy.
+_Avoid_: Ignite, scorch, DoT (Burn is the canonical term; "DoT" is a category, not a damage type)
+
+**Frostbite**:
+A damage-over-time damage type, the Cold-flavored DoT. Applied by some Cryomancy skills as stacking debuffs that tick Cold damage over time. Mirrors Burn's role for Pyromancy: enables a Frostbite-stacker sub-archetype that scales with stack count and detonation effects.
+_Avoid_: Chill (Chill, if used, is a separate slow-effect debuff, not a damage type)
+
+**Poison**:
+A damage-over-time damage type distinct from Bleed, applied primarily by Shadowblade. Scales with DEX. Affixes scale Poison damage / duration independently of physical and Bleed damage, enabling a "poison-stacker" Shadowblade archetype distinct from a pure-physical execute-assassin. Lore: alchemical / venomous, not magical.
+_Avoid_: Toxin, venom (Poison is the canonical term)
 
 ### Endgame
 
