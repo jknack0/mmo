@@ -1,9 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import type { AuthService } from '../auth/auth-service.js';
 import type { AuthError } from '../auth/types.js';
+import type { CharacterService, CharacterError } from '../character/character-service.js';
+import { requireAccount } from './require-account.js';
 
 export interface GatewayServerOptions {
   auth: AuthService;
+  characters: CharacterService;
   /** Origin the client SPA is served from. Discord callback redirects here. */
   clientOrigin: string;
 }
@@ -16,10 +19,19 @@ const AUTH_ERROR_STATUS: Record<AuthError, number> = {
   'discord-exchange-failed': 400,
 };
 
+const CHARACTER_ERROR_STATUS: Record<CharacterError, number> = {
+  'name-taken': 409,
+  'name-too-short': 400,
+  'name-too-long': 400,
+  'name-invalid-chars': 400,
+};
+
+const PLAY_PATH = /^\/characters\/([0-9a-f-]{36})\/play$/;
+
 function setCors(res: ServerResponse, origin: string): void {
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'content-type');
+  res.setHeader('Access-Control-Allow-Headers', 'content-type, authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 }
 
@@ -37,16 +49,14 @@ function redirect(res: ServerResponse, location: string): void {
 
 async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
-  }
+  for await (const chunk of req) chunks.push(chunk as Buffer);
   const raw = Buffer.concat(chunks).toString('utf-8');
   if (!raw) return {} as T;
   return JSON.parse(raw) as T;
 }
 
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
-  const { auth, clientOrigin } = opts;
+  const { auth, characters, clientOrigin } = opts;
 
   return createServer(async (req, res) => {
     try {
@@ -58,7 +68,7 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
         return;
       }
 
-      const url = new URL(req.url ?? '/', `http://localhost`);
+      const url = new URL(req.url ?? '/', 'http://localhost');
 
       // ─── POST /auth/email/register ────────────────────────────
       if (req.method === 'POST' && url.pathname === '/auth/email/register') {
@@ -132,6 +142,58 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           redirect(res, target.toString());
         }
         return;
+      }
+
+      // ─── GET /me ──────────────────────────────────────────────
+      if (req.method === 'GET' && url.pathname === '/me') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        sendJson(res, 200, { accountId: session.accountId });
+        return;
+      }
+
+      // ─── GET /characters ──────────────────────────────────────
+      if (req.method === 'GET' && url.pathname === '/characters') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const list = await characters.listCharacters(session.accountId);
+        sendJson(res, 200, { characters: list });
+        return;
+      }
+
+      // ─── POST /characters ─────────────────────────────────────
+      if (req.method === 'POST' && url.pathname === '/characters') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const body = await readJsonBody<{ name?: string }>(req);
+        if (!body.name) {
+          sendJson(res, 400, { error: 'missing-fields' });
+          return;
+        }
+        const outcome = await characters.createCharacter(session.accountId, body.name);
+        if (outcome.ok) {
+          sendJson(res, 201, { character: outcome.character });
+        } else {
+          sendJson(res, CHARACTER_ERROR_STATUS[outcome.error], { error: outcome.error });
+        }
+        return;
+      }
+
+      // ─── POST /characters/:id/play ────────────────────────────
+      if (req.method === 'POST') {
+        const playMatch = PLAY_PATH.exec(url.pathname);
+        if (playMatch) {
+          const session = await requireAccount(req, res, auth);
+          if (!session) return;
+          const characterId = playMatch[1]!;
+          const character = await characters.loadCharacter(session.accountId, characterId);
+          if (!character) {
+            sendJson(res, 404, { error: 'character-not-found' });
+            return;
+          }
+          sendJson(res, 200, { character });
+          return;
+        }
       }
 
       // ─── GET /health ──────────────────────────────────────────

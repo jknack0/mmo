@@ -9,6 +9,8 @@ import { createSessionStore } from './auth/session-store.js';
 import { createPasswordHasher } from './auth/password-hasher.js';
 import { createDiscordClient } from './auth/discord-client.js';
 import { createAuthService } from './auth/auth-service.js';
+import { createCharacterRepo } from './character/character-repo.js';
+import { createCharacterService } from './character/character-service.js';
 import { buildGatewayServer } from './http/server.js';
 
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
@@ -31,7 +33,15 @@ async function main(): Promise<void> {
     redis,
   });
 
-  const server = buildGatewayServer({ auth, clientOrigin: CLIENT_ORIGIN });
+  const characters = createCharacterService({
+    characterRepo: createCharacterRepo(db),
+  });
+
+  const server = buildGatewayServer({
+    auth,
+    characters,
+    clientOrigin: CLIENT_ORIGIN,
+  });
   server.listen(env.gatewayPort, () => {
     console.log(`[gateway] listening on http://localhost:${env.gatewayPort}`);
     console.log(`[gateway] client origin: ${CLIENT_ORIGIN}`);
