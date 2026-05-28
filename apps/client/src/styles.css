@@ -1,0 +1,18 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-brand: #6ab0ff;
+  --color-bg-dark: #111;
+  --color-panel: rgba(0, 0, 0, 0.6);
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--color-bg-dark);
+  color: #ddd;
+  font-family: system-ui, -apple-system, sans-serif;
+}

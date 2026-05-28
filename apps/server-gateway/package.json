@@ -4,12 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
-    "@mmo/protocol": "workspace:*"
+    "@mmo/protocol": "workspace:*",
+    "bcrypt": "^6.0.0",
+    "dotenv": "^17.4.2",
+    "ioredis": "^5.11.0",
+    "kysely": "^0.29.2",
+    "pg": "^8.21.0"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/pg": "^8.20.0",
     "tsx": "^4.19.2"
   }
 }
