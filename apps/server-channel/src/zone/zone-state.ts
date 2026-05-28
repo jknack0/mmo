@@ -9,6 +9,11 @@ import type {
   MobState,
 } from '@mmo/protocol';
 
+export type PlayerAttackState =
+  | { kind: 'idle' }
+  | { kind: 'chasing'; targetId: EntityId; skillId: SkillId }
+  | { kind: 'in-range-attacking'; targetId: EntityId; skillId: SkillId };
+
 export interface ServerPlayer {
   id: PlayerId;
   characterId: CharacterId;
@@ -19,6 +24,8 @@ export interface ServerPlayer {
   speed: number;
   /** Per-skill cooldown expiry (wall-clock ms). */
   cooldowns: Map<SkillId, number>;
+  /** Sticky-attack-target FSM per PROTOTYPE_NOTES.md lesson #1. */
+  attackState: PlayerAttackState;
 }
 
 export interface ServerMob {
@@ -84,6 +91,7 @@ export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPla
     target: null,
     speed: input.speed ?? DEFAULT_SPEED_TILES_PER_SEC,
     cooldowns: new Map(),
+    attackState: { kind: 'idle' },
   };
   zone.players.set(input.id, player);
   return player;
@@ -173,6 +181,8 @@ export function setPlayerTarget(zone: ZoneState, id: PlayerId, target: Vec2): bo
   if (!isWalkable(zone, clamped)) return false;
 
   player.target = clamped;
+  // Manual move cancels any sticky attack target — the D2/PoE convention.
+  player.attackState = { kind: 'idle' };
   return true;
 }
 
@@ -202,11 +212,14 @@ export function stepMovement(zone: ZoneState, dtSec: number): void {
 export function snapshotZone(zone: ZoneState): ZoneSnapshot {
   const players: PlayerState[] = [];
   for (const p of zone.players.values()) {
+    const engaged =
+      p.attackState.kind === 'idle' ? null : p.attackState.targetId;
     players.push({
       id: p.id,
       characterId: p.characterId,
       name: p.name,
       pos: { ...p.pos },
+      engagedTargetId: engaged,
     });
   }
   const mobs: MobState[] = [];

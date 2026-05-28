@@ -9,6 +9,7 @@ export interface InterpolatedPlayerState {
   characterId: string;
   name: string;
   pos: Vec2;
+  engagedTargetId: string | null;
 }
 
 export interface InterpolatedMobState {
@@ -42,6 +43,7 @@ interface TrackedPlayer {
   name: string;
   target: Vec2;
   render: Vec2;
+  engagedTargetId: string | null;
 }
 
 interface TrackedMob {
@@ -68,12 +70,14 @@ export function createSnapshotInterpolator(
         if (existing) {
           existing.target = { ...p.pos };
           existing.name = p.name;
+          existing.engagedTargetId = p.engagedTargetId ?? null;
         } else {
           players.set(p.id, {
             characterId: p.characterId,
             name: p.name,
             target: { ...p.pos },
             render: { ...p.pos },
+            engagedTargetId: p.engagedTargetId ?? null,
           });
         }
       }
@@ -115,6 +119,7 @@ export function createSnapshotInterpolator(
           characterId: t.characterId,
           name: t.name,
           pos: { x: t.render.x, y: t.render.y },
+          engagedTargetId: t.engagedTargetId,
         });
       }
       const outMobs: InterpolatedMobState[] = [];

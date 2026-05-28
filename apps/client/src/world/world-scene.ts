@@ -82,7 +82,13 @@ export async function mountWorldScene(
 
   // ─── Sprite entries ────────────────────────────────────────────
   interface PlayerSpriteEntry { container: Container; }
-  interface MobSpriteEntry { container: Container; hpBar: Graphics; body: Graphics; }
+  interface MobSpriteEntry {
+    container: Container;
+    hpBar: Graphics;
+    body: Graphics;
+    /** Yellow target ring drawn underfoot when the local player is sticky-targeting this mob. */
+    targetRing: Graphics;
+  }
   const playerSprites = new Map<string, PlayerSpriteEntry>();
   const mobSprites = new Map<string, MobSpriteEntry>();
   // mobId → { x, y } in tile coords, kept fresh from latest render frame
@@ -117,6 +123,8 @@ export async function mountWorldScene(
     const container = new Container();
     container.eventMode = 'static';
     container.cursor = 'crosshair';
+    const targetRing = new Graphics();
+    targetRing.visible = false;
     const feet = new Graphics()
       .ellipse(0, 0, 12, 5)
       .fill({ color: 0x000000, alpha: 0.5 });
@@ -136,8 +144,15 @@ export async function mountWorldScene(
     label.y = -30;
     const hpBar = new Graphics();
     hpBar.y = -36;
-    container.addChild(feet, body, label, hpBar);
-    return { container, hpBar, body };
+    container.addChild(targetRing, feet, body, label, hpBar);
+    return { container, hpBar, body, targetRing };
+  }
+
+  function drawTargetRing(ring: Graphics): void {
+    ring.clear();
+    ring
+      .ellipse(0, 2, 16, 7)
+      .stroke({ color: 0xffd24a, width: 2 });
   }
 
   function drawHpBar(g: Graphics, hp: number, max: number, width = 30): void {
@@ -236,9 +251,12 @@ export async function mountWorldScene(
     ) {
       return;
     }
-    // Check if any alive mob is within ~0.7 tile radius of the click.
+    // Pick the closest alive mob within a generous tile radius. The mob's
+    // sprite body sits ~22px above its tile centre, so clicking on the
+    // visible mob lands a tile or two "above" its actual position in iso
+    // projection — the radius has to be loose enough to absorb that.
     let bestMob: InterpolatedMobState | null = null;
-    let bestDist = 0.7;
+    let bestDist = 2.2;
     for (const mob of aliveMobsByTile.values()) {
       const dx = mob.pos.x - clicked.x;
       const dy = mob.pos.y - clicked.y;
@@ -289,6 +307,10 @@ export async function mountWorldScene(
     // Mobs
     aliveMobsByTile.clear();
     const seenM = new Set<string>();
+    const myEngagedId =
+      myId != null
+        ? frame.players.find((p) => p.id === myId)?.engagedTargetId ?? null
+        : null;
     for (const m of frame.mobs) {
       seenM.add(m.id);
       lastMobPos.set(m.id, { x: m.pos.x, y: m.pos.y });
@@ -304,6 +326,9 @@ export async function mountWorldScene(
       entry.container.y = s.y;
       entry.container.alpha = m.alive ? 1 : 0.25;
       drawHpBar(entry.hpBar, m.hp, m.maxHp, 36);
+      const targeted = m.id === myEngagedId && m.alive;
+      entry.targetRing.visible = targeted;
+      if (targeted) drawTargetRing(entry.targetRing);
       entry.container.zIndex = m.pos.y;
     }
     for (const [id, entry] of mobSprites) {
