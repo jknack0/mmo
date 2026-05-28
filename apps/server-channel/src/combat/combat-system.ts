@@ -10,12 +10,14 @@ import {
   applyBurnStacks,
   detonateBurns,
   type ZoneState,
+  type ServerPlayer,
 } from '../zone/zone-state.js';
 import {
   onDamageDealt,
   spendSpirit,
   spendWrath,
 } from '../resources/resource-system.js';
+import { applyTripod, PYROMANCY_TRIPODS } from './tripods.js';
 
 export interface SkillDef {
   id: SkillId;
@@ -155,6 +157,19 @@ function tileDistance(a: { x: number; y: number }, b: { x: number; y: number }):
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+/**
+ * Resolve the player's effective SkillDef by applying any tripod
+ * selection on top of the base definition.
+ */
+function resolveSkill(player: ServerPlayer, skillId: SkillId): SkillDef | undefined {
+  const base = SKILL_DEFS[skillId];
+  if (!base) return undefined;
+  const tripod = PYROMANCY_TRIPODS[skillId];
+  const sel = player.tripods?.[skillId];
+  if (!tripod || !sel) return base;
+  return applyTripod(base, sel, tripod);
+}
+
 export function attemptAttack(
   zone: ZoneState,
   attackerId: PlayerId,
@@ -162,11 +177,10 @@ export function attemptAttack(
   skillId: SkillId,
   nowMs: number
 ): AttackOutcome {
-  const def = SKILL_DEFS[skillId];
-  if (!def) return { ok: false, reason: 'unknown-skill' };
-
   const attacker = zone.players.get(attackerId);
   if (!attacker) return { ok: false, reason: 'attacker-missing' };
+  const def = resolveSkill(attacker, skillId);
+  if (!def) return { ok: false, reason: 'unknown-skill' };
 
   const target = zone.mobs.get(targetId);
   if (!target) return { ok: false, reason: 'target-missing' };
@@ -248,7 +262,7 @@ export function advancePlayerCombat(
   const state = player.attackState;
   if (state.kind === 'idle') return [];
 
-  const skill = SKILL_DEFS[state.skillId];
+  const skill = resolveSkill(player, state.skillId);
   if (!skill) {
     player.attackState = { kind: 'idle' };
     return [];

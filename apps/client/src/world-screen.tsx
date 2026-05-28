@@ -6,6 +6,7 @@ import { onMount, onCleanup, createSignal, Show } from 'solid-js';
 import type { Character } from './character-client.js';
 import { connect } from './network/gateway-client.js';
 import { mountWorldScene, type LocalPlayerStats } from './world/world-scene.js';
+import { TripodPanel } from './tripod-panel.js';
 
 export interface WorldScreenProps {
   sessionToken: string;
@@ -67,6 +68,7 @@ function SkillSlot(props: { hotkey: string; label: string; color: string }) {
 export function WorldScreen(props: WorldScreenProps) {
   const [error, setError] = createSignal<string | null>(null);
   const [stats, setStats] = createSignal<LocalPlayerStats>(DEFAULT_STATS);
+  const [showTripods, setShowTripods] = createSignal(false);
   let mountEl: HTMLDivElement | undefined;
   let cleanup: (() => void) | null = null;
 
@@ -139,6 +141,13 @@ export function WorldScreen(props: WorldScreenProps) {
         <button
           type="button"
           class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
+          onClick={() => setShowTripods(true)}
+        >
+          Tripods
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
           onClick={props.onLeave}
         >
           Back
@@ -151,6 +160,14 @@ export function WorldScreen(props: WorldScreenProps) {
           Sign out
         </button>
       </div>
+
+      <Show when={showTripods()}>
+        <TripodPanel
+          token={props.sessionToken}
+          characterId={props.character.id}
+          onClose={() => setShowTripods(false)}
+        />
+      </Show>
 
       <Show when={error()}>
         <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-red-500/20 border border-red-500/40 px-4 py-2 rounded text-sm text-red-200">
