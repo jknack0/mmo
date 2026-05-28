@@ -9,6 +9,8 @@ export interface GatewayServerOptions {
   characters: CharacterService;
   /** Origin the client SPA is served from. Discord callback redirects here. */
   clientOrigin: string;
+  /** WS URL of the single hardcoded channel (until S04 wires ChannelRouter). */
+  channelWsUrl: string;
 }
 
 const AUTH_ERROR_STATUS: Record<AuthError, number> = {
@@ -56,7 +58,7 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 }
 
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
-  const { auth, characters, clientOrigin } = opts;
+  const { auth, characters, clientOrigin, channelWsUrl } = opts;
 
   return createServer(async (req, res) => {
     try {
@@ -176,6 +178,31 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
         } else {
           sendJson(res, CHARACTER_ERROR_STATUS[outcome.error], { error: outcome.error });
         }
+        return;
+      }
+
+      // ─── POST /connect ────────────────────────────────────────
+      if (req.method === 'POST' && url.pathname === '/connect') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const body = await readJsonBody<{ characterId?: string }>(req);
+        if (!body.characterId) {
+          sendJson(res, 400, { error: 'missing-fields' });
+          return;
+        }
+        const character = await characters.loadCharacter(
+          session.accountId,
+          body.characterId
+        );
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        sendJson(res, 200, {
+          wsUrl: channelWsUrl,
+          channelId: 'alpha-test-zone-ch0',
+          character: { id: character.id, name: character.name },
+        });
         return;
       }
 
