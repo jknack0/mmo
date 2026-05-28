@@ -30,6 +30,8 @@ export interface ServerPlayer {
   attackState: PlayerAttackState;
   /** Spirit + Wrath resources per ADR-0010. */
   resources: ResourceState;
+  /** Wall-clock ms when this player's dodge i-frame window ends. */
+  dodgeInvulUntil: number;
 }
 
 export interface ServerMob {
@@ -43,6 +45,14 @@ export interface ServerMob {
   /** Wall-clock ms when a dead mob should respawn. */
   respawnAt: number | null;
   respawnMs: number;
+  /** Active Burn stacks (Fire DoT, ADR Pyromancy doc). */
+  burnStacks: number;
+  /** Wall-clock ms when the current stack set expires. */
+  burnExpiresAt: number;
+  /** Wall-clock ms when the last Burn tick fired. */
+  burnLastTickAt: number;
+  /** PlayerId most recently responsible for the active Burn — receives credit for ticks. */
+  burnLastAttackerId: PlayerId | null;
 }
 
 export interface ZoneState {
@@ -104,6 +114,7 @@ export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPla
       maxSpirit: DEFAULT_MAX_SPIRIT,
       maxWrath: DEFAULT_MAX_WRATH,
     }),
+    dodgeInvulUntil: 0,
   };
   zone.players.set(input.id, player);
   return player;
@@ -124,9 +135,147 @@ export function spawnMob(zone: ZoneState, input: MobSpawnInput): ServerMob {
     alive: true,
     respawnAt: null,
     respawnMs: input.respawnMs ?? DEFAULT_RESPAWN_MS,
+    burnStacks: 0,
+    burnExpiresAt: 0,
+    burnLastTickAt: 0,
+    burnLastAttackerId: null,
   };
   zone.mobs.set(input.id, mob);
   return mob;
+}
+
+// ─── Spacebar dodge ───────────────────────────────────────────
+
+export const DODGE_TILES = 4;
+export const DODGE_COOLDOWN_MS = 3_000;
+export const DODGE_INVUL_MS = 300;
+const DODGE_SKILL_ID = 'dodge';
+
+/**
+ * Apply a player-initiated dodge: short dash + brief i-frames, gated by
+ * a per-player cooldown stored on the player's cooldowns map. Returns
+ * false if the dodge was refused (still on cooldown).
+ */
+export function performDodge(
+  zone: ZoneState,
+  playerId: PlayerId,
+  nowMs: number
+): boolean {
+  const player = zone.players.get(playerId);
+  if (!player) return false;
+  const expires = player.cooldowns.get(DODGE_SKILL_ID) ?? 0;
+  if (nowMs < expires) return false;
+
+  // Direction: toward the current move target if any, otherwise default east.
+  let dx = 1, dy = 0;
+  if (player.target) {
+    const tx = player.target.x - player.pos.x;
+    const ty = player.target.y - player.pos.y;
+    const d = Math.sqrt(tx * tx + ty * ty);
+    if (d > 0.01) {
+      dx = tx / d;
+      dy = ty / d;
+    }
+  }
+  // Try the full dash; if the landing tile is blocked, halve until walkable.
+  let landed: Vec2 = { x: player.pos.x, y: player.pos.y };
+  for (let step = 1; step >= 0.25; step -= 0.25) {
+    const candidate: Vec2 = {
+      x: Math.max(0, Math.min(zone.size.x - 1, player.pos.x + dx * DODGE_TILES * step)),
+      y: Math.max(0, Math.min(zone.size.y - 1, player.pos.y + dy * DODGE_TILES * step)),
+    };
+    if (isWalkable(zone, candidate)) {
+      landed = candidate;
+      break;
+    }
+  }
+  player.pos = landed;
+  player.target = null;
+  player.cooldowns.set(DODGE_SKILL_ID, nowMs + DODGE_COOLDOWN_MS);
+  player.dodgeInvulUntil = nowMs + DODGE_INVUL_MS;
+  player.attackState = { kind: 'idle' };
+  return true;
+}
+
+// ─── Burn DoT ─────────────────────────────────────────────────
+
+export const BURN_CAP = 5;
+export const BURN_DURATION_MS = 6_000;
+export const BURN_TICK_INTERVAL_MS = 1_000;
+export const BURN_DAMAGE_PER_STACK = 2;
+
+/**
+ * Add Burn stacks to a mob (no-op on dead mobs). Stacks cap at BURN_CAP
+ * and the expiry is always refreshed to BURN_DURATION_MS from now.
+ */
+export function applyBurnStacks(
+  zone: ZoneState,
+  mobId: EntityId,
+  stacks: number,
+  attackerId: PlayerId,
+  nowMs: number
+): void {
+  const mob = zone.mobs.get(mobId);
+  if (!mob || !mob.alive) return;
+  mob.burnStacks = Math.min(BURN_CAP, mob.burnStacks + stacks);
+  mob.burnExpiresAt = nowMs + BURN_DURATION_MS;
+  mob.burnLastAttackerId = attackerId;
+  // First-time application: align the tick clock so the first tick lands
+  // BURN_TICK_INTERVAL_MS in the future, not immediately.
+  if (mob.burnLastTickAt === 0) {
+    mob.burnLastTickAt = nowMs;
+  }
+}
+
+/**
+ * Advance the Burn DoT for every mob and return any Damage events fired.
+ * Stacks clear automatically once burnExpiresAt is reached.
+ */
+export function stepBurns(
+  zone: ZoneState,
+  nowMs: number
+): { targetId: EntityId; attackerId: PlayerId; amount: number; fatal: boolean }[] {
+  const events: { targetId: EntityId; attackerId: PlayerId; amount: number; fatal: boolean }[] = [];
+  for (const mob of zone.mobs.values()) {
+    if (!mob.alive || mob.burnStacks === 0) continue;
+    if (nowMs >= mob.burnExpiresAt) {
+      mob.burnStacks = 0;
+      mob.burnLastAttackerId = null;
+      continue;
+    }
+    if (nowMs - mob.burnLastTickAt >= BURN_TICK_INTERVAL_MS) {
+      const damage = mob.burnStacks * BURN_DAMAGE_PER_STACK;
+      const { fatal, applied } = damageMob(zone, mob.id, damage, nowMs);
+      if (applied > 0) {
+        events.push({
+          targetId: mob.id,
+          attackerId: mob.burnLastAttackerId ?? mob.id,
+          amount: applied,
+          fatal,
+        });
+      }
+      mob.burnLastTickAt = nowMs;
+    }
+  }
+  return events;
+}
+
+/**
+ * Consume every active Burn stack on a mob and return the total damage
+ * value `damagePerStack × stacks`. Caller applies the damage via
+ * `damageMob`. Returns 0 if the mob is unknown or carries no stacks.
+ */
+export function detonateBurns(
+  zone: ZoneState,
+  mobId: EntityId,
+  damagePerStack: number
+): number {
+  const mob = zone.mobs.get(mobId);
+  if (!mob || mob.burnStacks === 0) return 0;
+  const total = mob.burnStacks * damagePerStack;
+  mob.burnStacks = 0;
+  mob.burnLastAttackerId = null;
+  return total;
 }
 
 /**
@@ -247,6 +396,7 @@ export function snapshotZone(zone: ZoneState): ZoneSnapshot {
       hp: m.hp,
       maxHp: m.maxHp,
       alive: m.alive,
+      burnStacks: m.burnStacks,
     });
   }
   return { tick: zone.tick, players, mobs };

@@ -124,14 +124,14 @@ export function WorldScreen(props: WorldScreenProps) {
         />
       </div>
 
-      {/* HUD: bottom-center skill bar */}
-      <div class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 px-3 py-2 rounded backdrop-blur flex gap-3">
-        <SkillSlot hotkey="Q" label="Spark" color="linear-gradient(180deg, #ff8a3a, #b04a1f)" />
-        <SkillSlot
-          hotkey="R"
-          label="Pyro"
-          color="linear-gradient(180deg, #ffd24a, #a04a1f)"
-        />
+      {/* HUD: bottom-center 6-slot Pyromancy hotbar */}
+      <div class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 px-3 py-2 rounded backdrop-blur flex gap-2">
+        <SkillSlot hotkey="Q" label="Spark"   color="linear-gradient(180deg, #ff8a3a, #b04a1f)" />
+        <SkillSlot hotkey="W" label="Cinder"  color="linear-gradient(180deg, #ff7a3a, #8a3a1f)" />
+        <SkillSlot hotkey="E" label="Fireball" color="linear-gradient(180deg, #ff6a3a, #a03a1f)" />
+        <SkillSlot hotkey="R" label="Pyro"    color="linear-gradient(180deg, #ffd24a, #a04a1f)" />
+        <SkillSlot hotkey="A" label="Combust" color="linear-gradient(180deg, #ffa83a, #b03a1f)" />
+        <SkillSlot hotkey="S" label="Meteor"  color="linear-gradient(180deg, #ff9a3a, #c03a1f)" />
       </div>
 
       {/* Top-right controls */}

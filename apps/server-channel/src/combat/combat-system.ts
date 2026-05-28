@@ -5,7 +5,12 @@
 // resource gating (ADR-0010).
 
 import type { PlayerId, EntityId, SkillId, DamageEvent } from '@mmo/protocol';
-import { damageMob, type ZoneState } from '../zone/zone-state.js';
+import {
+  damageMob,
+  applyBurnStacks,
+  detonateBurns,
+  type ZoneState,
+} from '../zone/zone-state.js';
 import {
   onDamageDealt,
   spendSpirit,
@@ -20,6 +25,14 @@ export interface SkillDef {
   /** ADR-0010: most skills cost Spirit; a few elite skills cost Wrath. */
   spiritCost: number;
   wrathCost: number;
+  /** Burn stacks applied to the target on hit (Pyromancy DoT). */
+  burnStacksApplied?: number;
+  /** When true, after the hit lands the skill also detonates Burn stacks. */
+  detonatesBurn?: boolean;
+  /** Bonus per consumed Burn stack when detonating (Combust + Pyroclasm). */
+  detonateBonusPerStack?: number;
+  /** A short, player-facing name for the HUD. */
+  label?: string;
 }
 
 /**
@@ -32,29 +45,92 @@ export interface SkillDef {
  * pyroclasm    — Pyromancy elite: massive damage, full-Wrath gate.
  */
 export const SKILL_DEFS: Record<SkillId, SkillDef> = {
+  // Universal weapon attack.
   'basic-attack': {
-    id: 'basic-attack',
-    cooldownMs: 500,
-    rangeTiles: 2,
-    damage: 12,
-    spiritCost: 0,
-    wrathCost: 0,
+    id: 'basic-attack', label: 'Attack',
+    cooldownMs: 500, rangeTiles: 2, damage: 12,
+    spiritCost: 0, wrathCost: 0,
   },
+
+  // ─── Pyromancy — Mobility ───────────────────────────────────
+  'ember-step': {
+    id: 'ember-step', label: 'Ember Step',
+    cooldownMs: 8_000, rangeTiles: 5, damage: 6,
+    spiritCost: 4, wrathCost: 0,
+    burnStacksApplied: 1,
+  },
+
+  // ─── Pyromancy — Spammable filler ───────────────────────────
   spark: {
-    id: 'spark',
-    cooldownMs: 350,
-    rangeTiles: 8,
-    damage: 10,
-    spiritCost: 8,
-    wrathCost: 0,
+    id: 'spark', label: 'Spark',
+    cooldownMs: 350, rangeTiles: 8, damage: 10,
+    spiritCost: 8, wrathCost: 0,
   },
+  'cinder-spray': {
+    id: 'cinder-spray', label: 'Cinder Spray',
+    cooldownMs: 3_000, rangeTiles: 4, damage: 8,
+    spiritCost: 12, wrathCost: 0,
+    burnStacksApplied: 1,
+  },
+  'heat-wave': {
+    id: 'heat-wave', label: 'Heat Wave',
+    cooldownMs: 5_000, rangeTiles: 3, damage: 14,
+    spiritCost: 16, wrathCost: 0,
+  },
+
+  // ─── Pyromancy — Mid-cd burst ──────────────────────────────
+  fireball: {
+    id: 'fireball', label: 'Fireball',
+    cooldownMs: 8_000, rangeTiles: 7, damage: 30,
+    spiritCost: 24, wrathCost: 0,
+  },
+  'flame-lance': {
+    id: 'flame-lance', label: 'Flame Lance',
+    cooldownMs: 10_000, rangeTiles: 10, damage: 38,
+    spiritCost: 28, wrathCost: 0,
+  },
+  combust: {
+    id: 'combust', label: 'Combust',
+    cooldownMs: 12_000, rangeTiles: 6, damage: 18,
+    spiritCost: 30, wrathCost: 0,
+    detonatesBurn: true,
+    detonateBonusPerStack: 10,
+  },
+
+  // ─── Pyromancy — Heavy nuke ────────────────────────────────
+  meteor: {
+    id: 'meteor', label: 'Meteor',
+    cooldownMs: 30_000, rangeTiles: 8, damage: 90,
+    spiritCost: 45, wrathCost: 0,
+  },
+  firestorm: {
+    id: 'firestorm', label: 'Firestorm',
+    cooldownMs: 35_000, rangeTiles: 6, damage: 70,
+    spiritCost: 40, wrathCost: 0,
+    burnStacksApplied: 2,
+  },
+
+  // ─── Pyromancy — Utility ────────────────────────────────────
+  'wall-of-flame': {
+    id: 'wall-of-flame', label: 'Wall of Flame',
+    cooldownMs: 25_000, rangeTiles: 5, damage: 20,
+    spiritCost: 20, wrathCost: 0,
+    burnStacksApplied: 1,
+  },
+
+  // ─── Pyromancy — Elite (Wrath) ─────────────────────────────
   pyroclasm: {
-    id: 'pyroclasm',
-    cooldownMs: 5_000,
-    rangeTiles: 4,
-    damage: 80,
-    spiritCost: 0,
-    wrathCost: 100,
+    id: 'pyroclasm', label: 'Pyroclasm',
+    cooldownMs: 5_000, rangeTiles: 4, damage: 80,
+    spiritCost: 0, wrathCost: 100,
+    detonatesBurn: true,
+    detonateBonusPerStack: 15,
+  },
+  cataclysm: {
+    id: 'cataclysm', label: 'Cataclysm',
+    cooldownMs: 60_000, rangeTiles: 10, damage: 150,
+    spiritCost: 0, wrathCost: 100,
+    burnStacksApplied: 3,
   },
 };
 
@@ -112,7 +188,18 @@ export function attemptAttack(
   if (def.spiritCost > 0) spendSpirit(attacker.resources, def.spiritCost);
   if (def.wrathCost > 0) spendWrath(attacker.resources, def.wrathCost);
 
-  const { fatal, applied } = damageMob(zone, targetId, def.damage, nowMs);
+  // Detonate stacks (Combust / Vaporizing Pyroclasm) BEFORE the base hit so
+  // the killing blow can be either the bonus or the base — but resolution
+  // still happens through damageMob for a single fatal check.
+  let bonus = 0;
+  if (def.detonatesBurn && def.detonateBonusPerStack) {
+    bonus = detonateBurns(zone, targetId, def.detonateBonusPerStack);
+  }
+  const total = def.damage + bonus;
+  const { fatal, applied } = damageMob(zone, targetId, total, nowMs);
+  if (def.burnStacksApplied && def.burnStacksApplied > 0 && !fatal) {
+    applyBurnStacks(zone, targetId, def.burnStacksApplied, attackerId, nowMs);
+  }
   attacker.cooldowns.set(skillId, nowMs + def.cooldownMs);
   onDamageDealt(attacker.resources, applied, nowMs);
   return { ok: true, damage: applied, fatal };
@@ -204,7 +291,15 @@ export function advancePlayerCombat(
   if (skill.spiritCost > 0) spendSpirit(player.resources, skill.spiritCost);
   if (skill.wrathCost > 0) spendWrath(player.resources, skill.wrathCost);
 
-  const { fatal, applied } = damageMob(zone, state.targetId, skill.damage, nowMs);
+  let bonus = 0;
+  if (skill.detonatesBurn && skill.detonateBonusPerStack) {
+    bonus = detonateBurns(zone, state.targetId, skill.detonateBonusPerStack);
+  }
+  const total = skill.damage + bonus;
+  const { fatal, applied } = damageMob(zone, state.targetId, total, nowMs);
+  if (skill.burnStacksApplied && skill.burnStacksApplied > 0 && !fatal) {
+    applyBurnStacks(zone, state.targetId, skill.burnStacksApplied, playerId, nowMs);
+  }
   player.cooldowns.set(state.skillId, nowMs + skill.cooldownMs);
   onDamageDealt(player.resources, applied, nowMs);
   return [
