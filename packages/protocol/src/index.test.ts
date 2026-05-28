@@ -25,6 +25,24 @@ describe('Protocol round-trip (JSON dev mode)', () => {
       expect(decodeClientMessage(encodeClientMessage(msg))).toEqual(msg);
     });
 
+    it('round-trips an Attack message', () => {
+      const msg: ClientMessage = {
+        type: 'attack',
+        targetId: 'skel-1',
+        skillId: 'basic-attack',
+      };
+      expect(decodeClientMessage(encodeClientMessage(msg))).toEqual(msg);
+    });
+
+    it('throws on an Attack payload missing targetId / skillId', () => {
+      expect(() =>
+        decodeClientMessage(JSON.stringify({ type: 'attack' }))
+      ).toThrow();
+      expect(() =>
+        decodeClientMessage(JSON.stringify({ type: 'attack', targetId: 'x' }))
+      ).toThrow();
+    });
+
     it('throws on a malformed payload', () => {
       expect(() => decodeClientMessage('{not json')).toThrow();
     });
@@ -56,19 +74,37 @@ describe('Protocol round-trip (JSON dev mode)', () => {
       expect(decodeServerMessage(encodeServerMessage(msg))).toEqual(msg);
     });
 
-    it('round-trips a Snapshot message', () => {
+    it('round-trips a Snapshot message with mobs', () => {
       const msg: ServerMessage = {
         type: 'snapshot',
         snapshot: {
           tick: 42,
           players: [
+            { id: 'p1', characterId: 'c1', name: 'Alice', pos: { x: 10, y: 12 } },
+          ],
+          mobs: [
             {
-              id: 'p1',
-              characterId: 'c1',
-              name: 'Alice',
-              pos: { x: 10, y: 12 },
+              id: 'skel-1',
+              kind: 'skeleton',
+              pos: { x: 15, y: 15 },
+              hp: 100,
+              maxHp: 100,
+              alive: true,
             },
           ],
+        },
+      };
+      expect(decodeServerMessage(encodeServerMessage(msg))).toEqual(msg);
+    });
+
+    it('round-trips a Damage event', () => {
+      const msg: ServerMessage = {
+        type: 'damage',
+        event: {
+          targetId: 'skel-1',
+          attackerId: 'p1',
+          amount: 12,
+          fatal: false,
         },
       };
       expect(decodeServerMessage(encodeServerMessage(msg))).toEqual(msg);

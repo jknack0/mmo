@@ -39,6 +39,11 @@ async function main(): Promise<void> {
   const server = buildChannelServer({
     redis,
     zone: { size: ZONE_SIZE, tileMap: buildTestTileMap(ZONE_SIZE) },
+    mobs: [
+      { id: 'skel-1', kind: 'skeleton', pos: { x: 15, y: 8 }, maxHp: 60 },
+      { id: 'skel-2', kind: 'skeleton', pos: { x: 18, y: 20 }, maxHp: 60 },
+      { id: 'skel-3', kind: 'skeleton', pos: { x: 22, y: 14 }, maxHp: 60 },
+    ],
   });
 
   await server.start(CHANNEL_PORT);

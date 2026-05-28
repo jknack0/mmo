@@ -51,6 +51,8 @@ const isSnapshot = (m: ServerMessage): m is Extract<ServerMessage, { type: 'snap
   m.type === 'snapshot';
 const isError = (m: ServerMessage): m is Extract<ServerMessage, { type: 'error' }> =>
   m.type === 'error';
+const isDamage = (m: ServerMessage): m is Extract<ServerMessage, { type: 'damage' }> =>
+  m.type === 'damage';
 
 describe('ChannelServer', () => {
   let redis: Redis;
@@ -62,6 +64,9 @@ describe('ChannelServer', () => {
     server = buildChannelServer({
       redis,
       zone: { size: { x: 10, y: 10 }, tileMap: TEST_MAP },
+      mobs: [
+        { id: 'skel-1', kind: 'skeleton', pos: { x: 5, y: 6 }, maxHp: 24, respawnMs: 5000 },
+      ],
       tickHz: 50, // faster ticks for snappier tests
     });
     await server.start(0);
@@ -71,6 +76,14 @@ describe('ChannelServer', () => {
 
   beforeEach(async () => {
     await redis.flushdb();
+    // Reset shared zone state (mobs persist across tests inside one server).
+    const zone = server.zoneState();
+    for (const mob of zone.mobs.values()) {
+      mob.hp = mob.maxHp;
+      mob.alive = true;
+      mob.respawnAt = null;
+      mob.pos = { ...mob.spawnPos };
+    }
   });
 
   afterAll(async () => {
@@ -186,5 +199,52 @@ describe('ChannelServer', () => {
     );
 
     b.close();
+  });
+
+  it('broadcasts a Damage event when a valid Attack lands', async () => {
+    const token = await issueSession('acct-atk');
+    const ws = await connectClient();
+    void sendHello(ws, { sessionToken: token, characterId: 'char-atk', name: 'Atk' });
+    const welcome = await waitFor(ws, isWelcome);
+    // Get spawned at centre (5,5) and the mob is at (5,6) → in range.
+    // Wait a beat so the mob snapshot has propagated.
+    await waitFor(ws, isSnapshot);
+
+    ws.send(
+      encodeClientMessage({ type: 'attack', targetId: 'skel-1', skillId: 'basic-attack' })
+    );
+
+    const dmg = await waitFor(ws, isDamage);
+    expect(dmg.event.targetId).toBe('skel-1');
+    expect(dmg.event.attackerId).toBe(welcome.you);
+    expect(dmg.event.amount).toBeGreaterThan(0);
+    expect(dmg.event.fatal).toBe(false);
+    ws.close();
+  });
+
+  it('emits a fatal Damage event when the killing blow lands', async () => {
+    // The mob has 24 HP; basic-attack does 12 → 2 hits to kill.
+    const token = await issueSession('acct-kill');
+    const ws = await connectClient();
+    void sendHello(ws, { sessionToken: token, characterId: 'char-kill', name: 'K' });
+    await waitFor(ws, isWelcome);
+    await waitFor(ws, isSnapshot);
+
+    ws.send(encodeClientMessage({ type: 'attack', targetId: 'skel-1', skillId: 'basic-attack' }));
+    await waitFor(ws, isDamage);
+    // Wait past the basic-attack cooldown (500ms).
+    await new Promise((r) => setTimeout(r, 600));
+    ws.send(encodeClientMessage({ type: 'attack', targetId: 'skel-1', skillId: 'basic-attack' }));
+
+    const fatal = await vi.waitFor(
+      async () => {
+        const ev = await waitFor(ws, isDamage, 1500);
+        expect(ev.event.fatal).toBe(true);
+        return ev;
+      },
+      { timeout: 3000, interval: 50 }
+    );
+    expect(fatal.event.targetId).toBe('skel-1');
+    ws.close();
   });
 });

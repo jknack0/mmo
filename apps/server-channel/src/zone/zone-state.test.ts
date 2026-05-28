@@ -6,6 +6,9 @@ import {
   setPlayerTarget,
   stepMovement,
   snapshotZone,
+  spawnMob,
+  damageMob,
+  stepMobs,
 } from './zone-state.js';
 
 // 5×5 grid where x=2 is a blocked column. Used by collision tests.
@@ -180,5 +183,82 @@ describe('snapshotZone', () => {
     expect(snap.tick).toBe(1);
     expect(snap.players).toHaveLength(1);
     expect(snap.players[0]?.name).toBe('Alice');
+    expect(snap.mobs).toEqual([]);
+  });
+
+  it('includes alive and dead mobs in the snapshot', () => {
+    const zone = tinyZone();
+    spawnMob(zone, { id: 'skel-1', kind: 'skeleton', pos: { x: 3, y: 3 }, maxHp: 100 });
+    spawnMob(zone, { id: 'skel-2', kind: 'skeleton', pos: { x: 0, y: 4 }, maxHp: 50 });
+    damageMob(zone, 'skel-2', 100, 1000);
+    const snap = snapshotZone(zone);
+    expect(snap.mobs).toHaveLength(2);
+    const skel2 = snap.mobs.find((m) => m.id === 'skel-2');
+    expect(skel2?.alive).toBe(false);
+    expect(skel2?.hp).toBe(0);
+  });
+});
+
+describe('Mobs — spawn, damage, respawn', () => {
+  it('spawnMob adds a mob at the requested position with full HP', () => {
+    const zone = tinyZone();
+    const m = spawnMob(zone, { id: 'skel-1', kind: 'skeleton', pos: { x: 3, y: 1 }, maxHp: 80 });
+    expect(m.pos).toEqual({ x: 3, y: 1 });
+    expect(m.hp).toBe(80);
+    expect(m.maxHp).toBe(80);
+    expect(m.alive).toBe(true);
+    expect(zone.mobs.size).toBe(1);
+  });
+
+  it('damageMob reduces HP and reports non-fatal hits', () => {
+    const zone = tinyZone();
+    spawnMob(zone, { id: 'm', kind: 'skeleton', pos: { x: 3, y: 1 }, maxHp: 100 });
+    const r = damageMob(zone, 'm', 30, 1000);
+    expect(r).toEqual({ fatal: false, applied: 30 });
+    expect(zone.mobs.get('m')!.hp).toBe(70);
+  });
+
+  it('damageMob kills the mob when HP reaches 0', () => {
+    const zone = tinyZone();
+    spawnMob(zone, { id: 'm', kind: 'skeleton', pos: { x: 3, y: 1 }, maxHp: 100, respawnMs: 5000 });
+    const r = damageMob(zone, 'm', 999, 1000);
+    expect(r).toEqual({ fatal: true, applied: 100 });
+    const m = zone.mobs.get('m')!;
+    expect(m.alive).toBe(false);
+    expect(m.hp).toBe(0);
+    expect(m.respawnAt).toBe(6000);
+  });
+
+  it('damageMob is a no-op on dead mobs', () => {
+    const zone = tinyZone();
+    spawnMob(zone, { id: 'm', kind: 'skeleton', pos: { x: 3, y: 1 }, maxHp: 100 });
+    damageMob(zone, 'm', 999, 1000);
+    const r = damageMob(zone, 'm', 50, 1500);
+    expect(r).toEqual({ fatal: false, applied: 0 });
+  });
+
+  it('stepMobs respawns dead mobs whose timer has elapsed', () => {
+    const zone = tinyZone();
+    spawnMob(zone, { id: 'm', kind: 'skeleton', pos: { x: 3, y: 1 }, maxHp: 100, respawnMs: 5000 });
+    damageMob(zone, 'm', 999, 1000);
+    stepMobs(zone, 5999);
+    expect(zone.mobs.get('m')!.alive).toBe(false);
+    stepMobs(zone, 6000);
+    const m = zone.mobs.get('m')!;
+    expect(m.alive).toBe(true);
+    expect(m.hp).toBe(100);
+    expect(m.respawnAt).toBeNull();
+  });
+
+  it('stepMobs is a no-op for alive mobs', () => {
+    const zone = tinyZone();
+    spawnMob(zone, { id: 'm', kind: 'skeleton', pos: { x: 3, y: 1 }, maxHp: 100 });
+    stepMobs(zone, 99999);
+    expect(zone.mobs.get('m')!.alive).toBe(true);
+  });
+
+  it('damaging an unknown mob is a no-op', () => {
+    const zone = tinyZone();
+    expect(damageMob(zone, 'ghost', 10, 1000)).toEqual({ fatal: false, applied: 0 });
   });
 });
