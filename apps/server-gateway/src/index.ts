@@ -14,6 +14,7 @@ import { createCharacterService } from './character/character-service.js';
 import { buildGatewayServer } from './http/server.js';
 
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
+const CHANNEL_WS_URL = process.env.CHANNEL_WS_URL ?? 'ws://localhost:8081';
 
 async function main(): Promise<void> {
   const db = createDb(env.databaseUrl);
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
     auth,
     characters,
     clientOrigin: CLIENT_ORIGIN,
+    channelWsUrl: CHANNEL_WS_URL,
   });
   server.listen(env.gatewayPort, () => {
     console.log(`[gateway] listening on http://localhost:${env.gatewayPort}`);

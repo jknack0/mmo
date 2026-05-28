@@ -36,6 +36,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.0
         version: 4.3.0(vite@6.4.2(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.3))
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
       tailwindcss:
         specifier: ^4.3.0
         version: 4.3.0
@@ -45,12 +48,24 @@ importers:
       vite-plugin-solid:
         specifier: ^2.11.12
         version: 2.11.12(solid-js@1.9.13)(vite@6.4.2(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.3))
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@25.9.1)(lightningcss@1.32.0)
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.0
 
   apps/server-channel:
     dependencies:
       '@mmo/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+      ioredis:
+        specifier: ^5.11.0
+        version: 5.11.0
       ws:
         specifier: ^8.18.0
         version: 8.21.0
@@ -61,6 +76,9 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.22.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@25.9.1)(lightningcss@1.32.0)
 
   apps/server-gateway:
     dependencies:

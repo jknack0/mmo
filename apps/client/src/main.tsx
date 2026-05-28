@@ -1,5 +1,4 @@
-// Client bootstrap. After auth, hands off to character select.
-// Gameplay handshake (S03 #5) becomes the next destination after "Play".
+// Client bootstrap. Three app states: login → character select → in-world.
 
 import { render } from 'solid-js/web';
 import { createSignal, Show, onMount, createEffect } from 'solid-js';
@@ -11,9 +10,9 @@ import {
   clearSession,
   storeSession,
 } from './auth-client.js';
-import { fetchMe } from './character-client.js';
+import { fetchMe, type Character } from './character-client.js';
 import { CharacterSelect } from './character-select.js';
-import type { Character } from './character-client.js';
+import { WorldScreen } from './world-screen.js';
 
 interface Session {
   sessionToken: string;
@@ -31,8 +30,6 @@ function App() {
     }
   });
 
-  // After auth, fill in accountId from /me if we don't have it yet (covers the
-  // Discord callback case where the redirect doesn't carry accountId).
   createEffect(() => {
     const s = session();
     if (s && !s.accountId) {
@@ -66,7 +63,8 @@ function App() {
       <Show
         when={!activeCharacter()}
         fallback={
-          <GameplayStub
+          <WorldScreen
+            sessionToken={session()!.sessionToken}
             character={activeCharacter()!}
             onLeave={() => setActiveCharacter(null)}
             onLogout={logout}
@@ -81,50 +79,6 @@ function App() {
         />
       </Show>
     </Show>
-  );
-}
-
-function GameplayStub(props: {
-  character: Character;
-  onLeave: () => void;
-  onLogout: () => void;
-}) {
-  return (
-    <div class="flex items-center justify-center h-full">
-      <div class="w-[420px] bg-[color:var(--color-panel)] p-8 rounded-lg border border-white/10">
-        <h1 class="text-2xl font-semibold mb-1">In the world</h1>
-        <p class="text-sm text-white/50 mb-4">
-          Playing as <span class="text-white font-medium">{props.character.name}</span>
-        </p>
-        <p class="text-sm text-white/50 mb-4">
-          The real gameplay handshake (gateway → channel → zone) lands in{' '}
-          <a
-            href="https://github.com/jknack0/mmo/issues/5"
-            target="_blank"
-            class="text-[color:var(--color-brand)] underline"
-          >
-            issue #5 (S03)
-          </a>
-          .
-        </p>
-        <div class="flex gap-2">
-          <button
-            type="button"
-            class="flex-1 py-2 rounded bg-white/10 hover:bg-white/20 text-white text-sm"
-            onClick={props.onLeave}
-          >
-            Back to character select
-          </button>
-          <button
-            type="button"
-            class="flex-1 py-2 rounded bg-white/10 hover:bg-white/20 text-white text-sm"
-            onClick={props.onLogout}
-          >
-            Sign out
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 

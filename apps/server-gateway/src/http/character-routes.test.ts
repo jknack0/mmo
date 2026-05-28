@@ -45,6 +45,7 @@ describe('Character HTTP routes', () => {
       auth,
       characters,
       clientOrigin: 'http://localhost:5173',
+      channelWsUrl: 'ws://channel.test:8081',
     });
     await new Promise<void>((resolve) => server.listen(0, resolve));
     const addr = server.address() as AddressInfo;

@@ -8,10 +8,13 @@
   },
   "dependencies": {
     "@mmo/protocol": "workspace:*",
+    "dotenv": "^17.4.2",
+    "ioredis": "^5.11.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/ws": "^8.5.13",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.8"
   }
 }
