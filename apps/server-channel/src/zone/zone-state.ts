@@ -1,9 +1,12 @@
 import type {
   PlayerId,
   CharacterId,
+  EntityId,
+  SkillId,
   Vec2,
   ZoneSnapshot,
   PlayerState,
+  MobState,
 } from '@mmo/protocol';
 
 export interface ServerPlayer {
@@ -14,16 +17,32 @@ export interface ServerPlayer {
   target: Vec2 | null;
   /** Tiles per second. */
   speed: number;
+  /** Per-skill cooldown expiry (wall-clock ms). */
+  cooldowns: Map<SkillId, number>;
+}
+
+export interface ServerMob {
+  id: EntityId;
+  kind: string;
+  pos: Vec2;
+  spawnPos: Vec2;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  /** Wall-clock ms when a dead mob should respawn. */
+  respawnAt: number | null;
+  respawnMs: number;
 }
 
 export interface ZoneState {
   size: Vec2;
   tileMap: number[][];
   players: Map<PlayerId, ServerPlayer>;
+  mobs: Map<EntityId, ServerMob>;
   tick: number;
 }
 
-export interface SpawnInput {
+export interface PlayerSpawnInput {
   id: PlayerId;
   characterId: CharacterId;
   name: string;
@@ -31,18 +50,28 @@ export interface SpawnInput {
   speed?: number;
 }
 
+export interface MobSpawnInput {
+  id: EntityId;
+  kind: string;
+  pos: Vec2;
+  maxHp: number;
+  respawnMs?: number;
+}
+
 const DEFAULT_SPEED_TILES_PER_SEC = 4;
+const DEFAULT_RESPAWN_MS = 5_000;
 
 export function createZoneState(opts: { size: Vec2; tileMap: number[][] }): ZoneState {
   return {
     size: opts.size,
     tileMap: opts.tileMap,
     players: new Map(),
+    mobs: new Map(),
     tick: 0,
   };
 }
 
-export function spawnPlayer(zone: ZoneState, input: SpawnInput): ServerPlayer {
+export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPlayer {
   const pos = input.pos ?? {
     x: Math.floor(zone.size.x / 2),
     y: Math.floor(zone.size.y / 2),
@@ -54,6 +83,7 @@ export function spawnPlayer(zone: ZoneState, input: SpawnInput): ServerPlayer {
     pos: { ...pos },
     target: null,
     speed: input.speed ?? DEFAULT_SPEED_TILES_PER_SEC,
+    cooldowns: new Map(),
   };
   zone.players.set(input.id, player);
   return player;
@@ -61,6 +91,60 @@ export function spawnPlayer(zone: ZoneState, input: SpawnInput): ServerPlayer {
 
 export function despawnPlayer(zone: ZoneState, id: PlayerId): void {
   zone.players.delete(id);
+}
+
+export function spawnMob(zone: ZoneState, input: MobSpawnInput): ServerMob {
+  const mob: ServerMob = {
+    id: input.id,
+    kind: input.kind,
+    pos: { ...input.pos },
+    spawnPos: { ...input.pos },
+    hp: input.maxHp,
+    maxHp: input.maxHp,
+    alive: true,
+    respawnAt: null,
+    respawnMs: input.respawnMs ?? DEFAULT_RESPAWN_MS,
+  };
+  zone.mobs.set(input.id, mob);
+  return mob;
+}
+
+/**
+ * Apply damage to a mob. Returns { fatal, applied } describing whether the
+ * hit killed the mob and how much actually landed (clamped to remaining HP).
+ * Dead mobs cannot be damaged again until they respawn.
+ */
+export function damageMob(
+  zone: ZoneState,
+  id: EntityId,
+  amount: number,
+  nowMs: number
+): { fatal: boolean; applied: number } {
+  const mob = zone.mobs.get(id);
+  if (!mob || !mob.alive) return { fatal: false, applied: 0 };
+  const applied = Math.min(amount, mob.hp);
+  mob.hp -= applied;
+  if (mob.hp <= 0) {
+    mob.hp = 0;
+    mob.alive = false;
+    mob.respawnAt = nowMs + mob.respawnMs;
+    return { fatal: true, applied };
+  }
+  return { fatal: false, applied };
+}
+
+/**
+ * Advance mob AI: respawn any dead mobs whose timer has elapsed.
+ */
+export function stepMobs(zone: ZoneState, nowMs: number): void {
+  for (const mob of zone.mobs.values()) {
+    if (!mob.alive && mob.respawnAt !== null && nowMs >= mob.respawnAt) {
+      mob.hp = mob.maxHp;
+      mob.alive = true;
+      mob.respawnAt = null;
+      mob.pos = { ...mob.spawnPos };
+    }
+  }
 }
 
 function isWalkable(zone: ZoneState, pos: Vec2): boolean {
@@ -125,5 +209,16 @@ export function snapshotZone(zone: ZoneState): ZoneSnapshot {
       pos: { ...p.pos },
     });
   }
-  return { tick: zone.tick, players };
+  const mobs: MobState[] = [];
+  for (const m of zone.mobs.values()) {
+    mobs.push({
+      id: m.id,
+      kind: m.kind,
+      pos: { ...m.pos },
+      hp: m.hp,
+      maxHp: m.maxHp,
+      alive: m.alive,
+    });
+  }
+  return { tick: zone.tick, players, mobs };
 }

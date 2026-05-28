@@ -16,9 +16,13 @@ import {
   despawnPlayer,
   setPlayerTarget,
   stepMovement,
+  stepMobs,
   snapshotZone,
+  spawnMob,
   type ZoneState,
+  type MobSpawnInput,
 } from './zone/zone-state.js';
+import { attemptAttack } from './combat/combat-system.js';
 
 interface Connection {
   ws: WebSocket;
@@ -28,6 +32,7 @@ interface Connection {
 export interface ChannelServerOptions {
   redis: Redis;
   zone: { size: Vec2; tileMap: number[][] };
+  mobs?: MobSpawnInput[];
   tickHz?: number;
 }
 
@@ -53,6 +58,10 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
   const dtSec = tickMs / 1000;
 
   const zone = createZoneState(opts.zone);
+  for (const mob of opts.mobs ?? []) {
+    spawnMob(zone, mob);
+  }
+
   const connections = new Map<WebSocket, Connection>();
 
   let wss: WebSocketServer | null = null;
@@ -63,6 +72,13 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
   ): Promise<{ accountId: string } | null> {
     const accountId = await opts.redis.get(`session:${sessionToken}`);
     return accountId ? { accountId } : null;
+  }
+
+  function broadcast(msg: ServerMessage): void {
+    const raw = encodeServerMessage(msg);
+    for (const { ws } of connections.values()) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(raw);
+    }
   }
 
   async function handleMessage(ws: WebSocket, conn: Connection, raw: string): Promise<void> {
@@ -106,16 +122,41 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       case 'move':
         setPlayerTarget(zone, conn.playerId, msg.target);
         return;
+      case 'attack': {
+        const result = attemptAttack(
+          zone,
+          conn.playerId,
+          msg.targetId,
+          msg.skillId,
+          Date.now()
+        );
+        if (!result.ok) {
+          if (result.reason === 'out-of-range') {
+            send(ws, { type: 'error', reason: 'out-of-range' });
+          }
+          return;
+        }
+        broadcast({
+          type: 'damage',
+          event: {
+            targetId: msg.targetId,
+            attackerId: conn.playerId,
+            amount: result.damage,
+            fatal: result.fatal,
+          },
+        });
+        return;
+      }
       case 'hello':
-        // Already authenticated; ignore.
         return;
     }
   }
 
   function tick(): void {
+    const now = Date.now();
     stepMovement(zone, dtSec);
-    const snap = snapshotZone(zone);
-    const payload = encodeServerMessage({ type: 'snapshot', snapshot: snap });
+    stepMobs(zone, now);
+    const payload = encodeServerMessage({ type: 'snapshot', snapshot: snapshotZone(zone) });
     for (const { ws } of connections.values()) {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload);
     }

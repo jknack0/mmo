@@ -7,6 +7,7 @@
 export type PlayerId = string;
 export type CharacterId = string;
 export type EntityId = string;
+export type SkillId = string;
 
 export interface Vec2 {
   x: number;
@@ -20,22 +21,41 @@ export interface PlayerState {
   pos: Vec2;
 }
 
+export interface MobState {
+  id: EntityId;
+  kind: string;
+  pos: Vec2;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+}
+
 export interface ZoneSnapshot {
   tick: number;
   players: PlayerState[];
+  mobs: MobState[];
 }
 
 // ─── Client → Channel ───────────────────────────────────────────
 
 export type ClientMessage =
   | { type: 'hello'; sessionToken: string; characterId: CharacterId; name: string }
-  | { type: 'move'; target: Vec2 };
+  | { type: 'move'; target: Vec2 }
+  | { type: 'attack'; targetId: EntityId; skillId: SkillId };
 
 // ─── Channel → Client ───────────────────────────────────────────
+
+export interface DamageEvent {
+  targetId: EntityId;
+  attackerId: PlayerId;
+  amount: number;
+  fatal: boolean;
+}
 
 export type ServerMessage =
   | { type: 'welcome'; you: PlayerId; zoneSize: Vec2; tileMap: number[][] }
   | { type: 'snapshot'; snapshot: ZoneSnapshot }
+  | { type: 'damage'; event: DamageEvent }
   | { type: 'error'; reason: string };
 
 // ─── Gateway HTTP shapes ────────────────────────────────────────
@@ -82,6 +102,11 @@ export function decodeClientMessage(raw: string): ClientMessage {
         throw new Error('protocol: malformed move');
       }
       return { type: 'move', target: parsed.target };
+    case 'attack':
+      if (typeof parsed.targetId !== 'string' || typeof parsed.skillId !== 'string') {
+        throw new Error('protocol: malformed attack');
+      }
+      return { type: 'attack', targetId: parsed.targetId, skillId: parsed.skillId };
     default:
       throw new Error(`protocol: unknown client message type "${parsed.type}"`);
   }
@@ -113,6 +138,20 @@ export function decodeServerMessage(raw: string): ServerMessage {
         throw new Error('protocol: malformed snapshot');
       }
       return { type: 'snapshot', snapshot: parsed.snapshot as ZoneSnapshot };
+    case 'damage': {
+      const ev = parsed.event;
+      if (
+        typeof ev !== 'object' ||
+        ev === null ||
+        typeof (ev as DamageEvent).targetId !== 'string' ||
+        typeof (ev as DamageEvent).attackerId !== 'string' ||
+        typeof (ev as DamageEvent).amount !== 'number' ||
+        typeof (ev as DamageEvent).fatal !== 'boolean'
+      ) {
+        throw new Error('protocol: malformed damage');
+      }
+      return { type: 'damage', event: ev as DamageEvent };
+    }
     case 'error':
       if (typeof parsed.reason !== 'string') {
         throw new Error('protocol: malformed error');
