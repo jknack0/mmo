@@ -19,6 +19,8 @@ export interface PlayerState {
   characterId: CharacterId;
   name: string;
   pos: Vec2;
+  /** Target this player is currently sticky-attacking, if any. */
+  engagedTargetId: EntityId | null;
 }
 
 export interface MobState {
@@ -51,6 +53,9 @@ export interface DamageEvent {
   amount: number;
   fatal: boolean;
 }
+
+// Optional: PlayerState.engagedTargetId may be omitted by older snapshots
+// during the migration window; decoder normalises to null in that case.
 
 export type ServerMessage =
   | { type: 'welcome'; you: PlayerId; zoneSize: Vec2; tileMap: number[][] }

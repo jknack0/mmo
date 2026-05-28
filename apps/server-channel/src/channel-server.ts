@@ -22,7 +22,7 @@ import {
   type ZoneState,
   type MobSpawnInput,
 } from './zone/zone-state.js';
-import { attemptAttack } from './combat/combat-system.js';
+import { engageTarget, advancePlayerCombat } from './combat/combat-system.js';
 
 interface Connection {
   ws: WebSocket;
@@ -123,28 +123,17 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         setPlayerTarget(zone, conn.playerId, msg.target);
         return;
       case 'attack': {
-        const result = attemptAttack(
+        // Attack now means "engage target with sticky FSM" per S06 (#8).
+        // The tick loop drives chase + auto-fire + damage broadcasts.
+        const ok = engageTarget(
           zone,
           conn.playerId,
           msg.targetId,
-          msg.skillId,
-          Date.now()
+          msg.skillId
         );
-        if (!result.ok) {
-          if (result.reason === 'out-of-range') {
-            send(ws, { type: 'error', reason: 'out-of-range' });
-          }
-          return;
+        if (!ok) {
+          send(ws, { type: 'error', reason: 'cannot-engage' });
         }
-        broadcast({
-          type: 'damage',
-          event: {
-            targetId: msg.targetId,
-            attackerId: conn.playerId,
-            amount: result.damage,
-            fatal: result.fatal,
-          },
-        });
         return;
       }
       case 'hello':
@@ -154,6 +143,14 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
 
   function tick(): void {
     const now = Date.now();
+    // Sticky-attack FSM runs BEFORE movement so the FSM's player.target
+    // assignment (when chasing) is what MovementSystem consumes this tick.
+    for (const player of zone.players.values()) {
+      const events = advancePlayerCombat(zone, player.id, now);
+      for (const ev of events) {
+        broadcast({ type: 'damage', event: ev });
+      }
+    }
     stepMovement(zone, dtSec);
     stepMobs(zone, now);
     const payload = encodeServerMessage({ type: 'snapshot', snapshot: snapshotZone(zone) });

@@ -222,8 +222,10 @@ describe('ChannelServer', () => {
     ws.close();
   });
 
-  it('emits a fatal Damage event when the killing blow lands', async () => {
+  it('emits a fatal Damage event when the killing blow lands (FSM auto-fires)', async () => {
     // The mob has 24 HP; basic-attack does 12 → 2 hits to kill.
+    // With the sticky-attack FSM, one Attack message engages the target
+    // and the tick loop fires damage every cooldown until the mob dies.
     const token = await issueSession('acct-kill');
     const ws = await connectClient();
     void sendHello(ws, { sessionToken: token, characterId: 'char-kill', name: 'K' });
@@ -231,20 +233,22 @@ describe('ChannelServer', () => {
     await waitFor(ws, isSnapshot);
 
     ws.send(encodeClientMessage({ type: 'attack', targetId: 'skel-1', skillId: 'basic-attack' }));
-    await waitFor(ws, isDamage);
-    // Wait past the basic-attack cooldown (500ms).
-    await new Promise((r) => setTimeout(r, 600));
-    ws.send(encodeClientMessage({ type: 'attack', targetId: 'skel-1', skillId: 'basic-attack' }));
 
-    const fatal = await vi.waitFor(
-      async () => {
-        const ev = await waitFor(ws, isDamage, 1500);
-        expect(ev.event.fatal).toBe(true);
-        return ev;
-      },
-      { timeout: 3000, interval: 50 }
-    );
-    expect(fatal.event.targetId).toBe('skel-1');
+    // Collect Damage events until a fatal one shows up.
+    const fatal = await new Promise<typeof ws extends WebSocket ? any : any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no fatal hit within 3s')), 3000);
+      const handler = (data: WebSocket.RawData) => {
+        let msg: ServerMessage;
+        try { msg = decodeServerMessage(data.toString()); } catch { return; }
+        if (msg.type === 'damage' && msg.event.fatal) {
+          clearTimeout(timer);
+          ws.off('message', handler);
+          resolve(msg);
+        }
+      };
+      ws.on('message', handler);
+    });
+    expect((fatal as { event: { targetId: string } }).event.targetId).toBe('skel-1');
     ws.close();
   });
 });
