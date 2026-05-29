@@ -7,6 +7,7 @@ import type { Character } from './character-client.js';
 import { connect } from './network/gateway-client.js';
 import { mountWorldScene, type LocalPlayerStats } from './world/world-scene.js';
 import { TripodPanel } from './tripod-panel.js';
+import { PassiveTreePanel } from './passive-tree-panel.js';
 
 export interface WorldScreenProps {
   sessionToken: string;
@@ -69,6 +70,7 @@ export function WorldScreen(props: WorldScreenProps) {
   const [error, setError] = createSignal<string | null>(null);
   const [stats, setStats] = createSignal<LocalPlayerStats>(DEFAULT_STATS);
   const [showTripods, setShowTripods] = createSignal(false);
+  const [showPassives, setShowPassives] = createSignal(false);
   let mountEl: HTMLDivElement | undefined;
   let cleanup: (() => void) | null = null;
 
@@ -148,6 +150,13 @@ export function WorldScreen(props: WorldScreenProps) {
         <button
           type="button"
           class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
+          onClick={() => setShowPassives(true)}
+        >
+          Passives
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
           onClick={props.onLeave}
         >
           Back
@@ -166,6 +175,14 @@ export function WorldScreen(props: WorldScreenProps) {
           token={props.sessionToken}
           characterId={props.character.id}
           onClose={() => setShowTripods(false)}
+        />
+      </Show>
+
+      <Show when={showPassives()}>
+        <PassiveTreePanel
+          token={props.sessionToken}
+          characterId={props.character.id}
+          onClose={() => setShowPassives(false)}
         />
       </Show>
 

@@ -27,6 +27,7 @@ import {
 import { engageTarget, advancePlayerCombat } from './combat/combat-system.js';
 import { stepResources } from './resources/resource-system.js';
 import { loadTripods } from './persistence/tripod-store.js';
+import { loadPassives } from './persistence/passive-store.js';
 
 interface Connection {
   ws: WebSocket;
@@ -108,14 +109,19 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       }
       const playerId = randomUUID();
       conn.playerId = playerId;
-      // Load saved tripod loadout for this character so S09 selections
-      // take effect from the first cast.
-      const tripods = await loadTripods(opts.redis, msg.characterId);
+      // Load saved tripod + passive loadouts for this character so S09/S10
+      // selections take effect from the first cast. equippedPyroSkillCount
+      // defaults to the full 6-of-6 Pyro hotbar at alpha (drives Annihilator).
+      const [tripods, passives] = await Promise.all([
+        loadTripods(opts.redis, msg.characterId),
+        loadPassives(opts.redis, msg.characterId),
+      ]);
       spawnPlayer(zone, {
         id: playerId,
         characterId: msg.characterId,
         name: msg.name,
         tripods,
+        passives,
       });
       send(ws, {
         type: 'welcome',

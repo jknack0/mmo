@@ -8,6 +8,7 @@
     "migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
+    "@mmo/domain": "workspace:^",
     "@mmo/protocol": "workspace:*",
     "bcrypt": "^6.0.0",
     "dotenv": "^17.4.2",

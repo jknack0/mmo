@@ -20,6 +20,9 @@ importers:
 
   apps/client:
     dependencies:
+      '@mmo/domain':
+        specifier: workspace:^
+        version: link:../../packages/domain
       '@mmo/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -57,6 +60,9 @@ importers:
 
   apps/server-channel:
     dependencies:
+      '@mmo/domain':
+        specifier: workspace:^
+        version: link:../../packages/domain
       '@mmo/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -82,6 +88,9 @@ importers:
 
   apps/server-gateway:
     dependencies:
+      '@mmo/domain':
+        specifier: workspace:^
+        version: link:../../packages/domain
       '@mmo/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
