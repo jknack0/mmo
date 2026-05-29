@@ -4,9 +4,11 @@ import {
   baseDerivedStats,
   incomingDamageMultiplier,
   PYROMANCERS_WARD_REDUCTION,
+  INT_FIRE_DMG_PER_POINT,
   DEFAULT_BURN_STACK_CAP,
   type DerivedStats,
 } from './stat-calculator.js';
+import { aggregateItemStats } from './items.js';
 import type { PassiveAllocation } from './passives.js';
 
 const alloc = (...ids: string[]): PassiveAllocation =>
@@ -142,6 +144,41 @@ describe('computeDerivedStats — Utility path', () => {
     ]) {
       expect(s.flags).toContain(f);
     }
+  });
+});
+
+describe('equipped item stats (S13)', () => {
+  it('base stats carry an all-zero attribute block', () => {
+    const b = baseDerivedStats();
+    expect(b.attributes).toEqual({ str: 0, dex: 0, int: 0, vit: 0 });
+    expect(b.armor).toBe(0);
+    expect(b.weaponDamageBonus).toBe(0);
+  });
+
+  it('surfaces equipped attributes on the derived stat block', () => {
+    const s = computeDerivedStats({}, { itemStats: aggregateItemStats(['rusty-sword', 'leather-vest']) });
+    // rusty-sword {str:2, weaponDamage:5} + leather-vest {vit:2, armor:5}
+    expect(s.attributes).toEqual({ str: 2, dex: 0, int: 0, vit: 2 });
+    expect(s.armor).toBe(5);
+    expect(s.weaponDamageBonus).toBe(5);
+  });
+
+  it('maps equipped INT into fire damage', () => {
+    const s = computeDerivedStats({}, { itemStats: aggregateItemStats(['apprentice-wand']) }); // int 4
+    expect(s.attributes.int).toBe(4);
+    expect(s.fireDamageMult).toBeCloseTo(1 + 4 * INT_FIRE_DMG_PER_POINT);
+  });
+
+  it('stacks item INT on top of passive fire bonuses additively', () => {
+    const s = computeDerivedStats(
+      { 'embered-soul': 1, 'inner-furnace': 1 }, // +5% fire
+      { itemStats: aggregateItemStats(['apprentice-orb']) } // int 3
+    );
+    expect(s.fireDamageMult).toBeCloseTo(1 + 0.05 + 3 * INT_FIRE_DMG_PER_POINT);
+  });
+
+  it('no item stats → identity (equals base)', () => {
+    expect(computeDerivedStats({})).toEqual(baseDerivedStats());
   });
 });
 

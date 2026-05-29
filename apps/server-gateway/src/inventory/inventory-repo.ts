@@ -1,0 +1,194 @@
+// InventoryRepo (S13 #15) — the canonical home of item instances. Per ADR-0013
+// items are server-issued UUIDs (the DB default generates them; the client
+// never authors an id) and every move between inventory ↔ equipped runs inside
+// a single transaction so an item is never briefly in two places or none.
+//
+// Invariant: an owned item has exactly one location row — either `inventory`
+// (a grid slot) or `equipped` (a gear slot). On-ground items (owner null) have
+// neither until picked up.
+
+import type { Kysely } from 'kysely';
+import type { Database } from '../db/types.js';
+
+export interface InventoryEntry {
+  itemId: string;
+  baseId: string;
+  slot: number;
+}
+
+export interface EquippedEntry {
+  itemId: string;
+  baseId: string;
+  gearSlot: string;
+}
+
+export type EquipResult =
+  | { ok: true; unequipped: string | null }
+  | { ok: false; reason: 'not-in-inventory' };
+
+export interface InventoryRepo {
+  createItem(baseId: string, ownerCharacterId: string | null): Promise<string>;
+  grantItem(characterId: string, baseId: string): Promise<{ itemId: string; slot: number }>;
+  stashItem(characterId: string, itemId: string): Promise<number>;
+  listInventory(characterId: string): Promise<InventoryEntry[]>;
+  listEquipped(characterId: string): Promise<EquippedEntry[]>;
+  equippedBaseIds(characterId: string): Promise<string[]>;
+  equip(characterId: string, itemId: string, gearSlot: string): Promise<EquipResult>;
+  unequip(characterId: string, gearSlot: string): Promise<boolean>;
+}
+
+/** Smallest non-negative slot index not already occupied. */
+function firstFreeSlot(used: number[]): number {
+  const set = new Set(used);
+  let i = 0;
+  while (set.has(i)) i++;
+  return i;
+}
+
+export function createInventoryRepo(db: Kysely<Database>): InventoryRepo {
+  async function nextFreeSlot(
+    trx: Kysely<Database>,
+    characterId: string
+  ): Promise<number> {
+    const rows = await trx
+      .selectFrom('inventory')
+      .select('slot')
+      .where('character_id', '=', characterId)
+      .execute();
+    return firstFreeSlot(rows.map((r) => r.slot));
+  }
+
+  return {
+    async createItem(baseId, ownerCharacterId) {
+      const row = await db
+        .insertInto('items')
+        .values({ base_id: baseId, owner_character_id: ownerCharacterId })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      return row.id;
+    },
+
+    async grantItem(characterId, baseId) {
+      const itemId = await this.createItem(baseId, characterId);
+      const slot = await this.stashItem(characterId, itemId);
+      return { itemId, slot };
+    },
+
+    async stashItem(characterId, itemId) {
+      return db.transaction().execute(async (trx) => {
+        await trx
+          .updateTable('items')
+          .set({ owner_character_id: characterId })
+          .where('id', '=', itemId)
+          .execute();
+        const slot = await nextFreeSlot(trx, characterId);
+        await trx
+          .insertInto('inventory')
+          .values({ character_id: characterId, slot, item_id: itemId })
+          .execute();
+        return slot;
+      });
+    },
+
+    async listInventory(characterId) {
+      const rows = await db
+        .selectFrom('inventory')
+        .innerJoin('items', 'items.id', 'inventory.item_id')
+        .select(['inventory.item_id as itemId', 'items.base_id as baseId', 'inventory.slot as slot'])
+        .where('inventory.character_id', '=', characterId)
+        .orderBy('inventory.slot')
+        .execute();
+      return rows as InventoryEntry[];
+    },
+
+    async listEquipped(characterId) {
+      const rows = await db
+        .selectFrom('equipped')
+        .innerJoin('items', 'items.id', 'equipped.item_id')
+        .select([
+          'equipped.item_id as itemId',
+          'items.base_id as baseId',
+          'equipped.gear_slot as gearSlot',
+        ])
+        .where('equipped.character_id', '=', characterId)
+        .execute();
+      return rows as EquippedEntry[];
+    },
+
+    async equippedBaseIds(characterId) {
+      const rows = await db
+        .selectFrom('equipped')
+        .innerJoin('items', 'items.id', 'equipped.item_id')
+        .select('items.base_id as baseId')
+        .where('equipped.character_id', '=', characterId)
+        .execute();
+      return rows.map((r) => r.baseId);
+    },
+
+    async equip(characterId, itemId, gearSlot) {
+      return db.transaction().execute<EquipResult>(async (trx) => {
+        const inv = await trx
+          .selectFrom('inventory')
+          .select('slot')
+          .where('character_id', '=', characterId)
+          .where('item_id', '=', itemId)
+          .executeTakeFirst();
+        if (!inv) return { ok: false, reason: 'not-in-inventory' };
+
+        // Pull the incoming item out of inventory, freeing its slot.
+        await trx.deleteFrom('inventory').where('item_id', '=', itemId).execute();
+
+        // If something already occupies this gear slot, swap it back to a bag slot.
+        const occupant = await trx
+          .selectFrom('equipped')
+          .select('item_id as itemId')
+          .where('character_id', '=', characterId)
+          .where('gear_slot', '=', gearSlot)
+          .executeTakeFirst();
+        let unequipped: string | null = null;
+        if (occupant) {
+          await trx
+            .deleteFrom('equipped')
+            .where('character_id', '=', characterId)
+            .where('gear_slot', '=', gearSlot)
+            .execute();
+          const slot = await nextFreeSlot(trx, characterId);
+          await trx
+            .insertInto('inventory')
+            .values({ character_id: characterId, slot, item_id: occupant.itemId })
+            .execute();
+          unequipped = occupant.itemId;
+        }
+
+        await trx
+          .insertInto('equipped')
+          .values({ character_id: characterId, gear_slot: gearSlot, item_id: itemId })
+          .execute();
+        return { ok: true, unequipped };
+      });
+    },
+
+    async unequip(characterId, gearSlot) {
+      return db.transaction().execute(async (trx) => {
+        const row = await trx
+          .selectFrom('equipped')
+          .select('item_id as itemId')
+          .where('character_id', '=', characterId)
+          .where('gear_slot', '=', gearSlot)
+          .executeTakeFirst();
+        if (!row) return false;
+        await trx
+          .deleteFrom('equipped')
+          .where('character_id', '=', characterId)
+          .where('gear_slot', '=', gearSlot)
+          .execute();
+        const slot = await nextFreeSlot(trx, characterId);
+        await trx
+          .insertInto('inventory')
+          .values({ character_id: characterId, slot, item_id: row.itemId })
+          .execute();
+        return true;
+      });
+    },
+  };
+}

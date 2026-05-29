@@ -40,10 +40,19 @@ export interface MobState {
   burnStacks?: number;
 }
 
+/** A dropped item lying in the world, awaiting pickup (S13). */
+export interface GroundItem {
+  /** Server-issued item UUID (ADR-0013). */
+  id: EntityId;
+  baseId: string;
+  pos: Vec2;
+}
+
 export interface ZoneSnapshot {
   tick: number;
   players: PlayerState[];
   mobs: MobState[];
+  groundItems: GroundItem[];
 }
 
 // ─── Client → Channel ───────────────────────────────────────────
@@ -52,7 +61,8 @@ export type ClientMessage =
   | { type: 'hello'; sessionToken: string; characterId: CharacterId; name: string }
   | { type: 'move'; target: Vec2 }
   | { type: 'attack'; targetId: EntityId; skillId: SkillId }
-  | { type: 'dodge' };
+  | { type: 'dodge' }
+  | { type: 'pickup'; itemId: EntityId };
 
 // ─── Channel → Client ───────────────────────────────────────────
 
@@ -70,6 +80,7 @@ export type ServerMessage =
   | { type: 'welcome'; you: PlayerId; zoneSize: Vec2; tileMap: number[][] }
   | { type: 'snapshot'; snapshot: ZoneSnapshot }
   | { type: 'damage'; event: DamageEvent }
+  | { type: 'picked-up'; itemId: EntityId; baseId: string }
   | { type: 'error'; reason: string };
 
 // ─── Gateway HTTP shapes ────────────────────────────────────────
@@ -123,6 +134,11 @@ export function decodeClientMessage(raw: string): ClientMessage {
       return { type: 'attack', targetId: parsed.targetId, skillId: parsed.skillId };
     case 'dodge':
       return { type: 'dodge' };
+    case 'pickup':
+      if (typeof parsed.itemId !== 'string') {
+        throw new Error('protocol: malformed pickup');
+      }
+      return { type: 'pickup', itemId: parsed.itemId };
     default:
       throw new Error(`protocol: unknown client message type "${parsed.type}"`);
   }
@@ -149,11 +165,15 @@ export function decodeServerMessage(raw: string): ServerMessage {
         zoneSize: parsed.zoneSize,
         tileMap: parsed.tileMap as number[][],
       };
-    case 'snapshot':
+    case 'snapshot': {
       if (typeof parsed.snapshot !== 'object' || parsed.snapshot === null) {
         throw new Error('protocol: malformed snapshot');
       }
-      return { type: 'snapshot', snapshot: parsed.snapshot as ZoneSnapshot };
+      const snap = parsed.snapshot as ZoneSnapshot;
+      // Tolerate snapshots from before groundItems existed.
+      if (!Array.isArray(snap.groundItems)) snap.groundItems = [];
+      return { type: 'snapshot', snapshot: snap };
+    }
     case 'damage': {
       const ev = parsed.event;
       if (
@@ -168,6 +188,11 @@ export function decodeServerMessage(raw: string): ServerMessage {
       }
       return { type: 'damage', event: ev as DamageEvent };
     }
+    case 'picked-up':
+      if (typeof parsed.itemId !== 'string' || typeof parsed.baseId !== 'string') {
+        throw new Error('protocol: malformed picked-up');
+      }
+      return { type: 'picked-up', itemId: parsed.itemId, baseId: parsed.baseId };
     case 'error':
       if (typeof parsed.reason !== 'string') {
         throw new Error('protocol: malformed error');

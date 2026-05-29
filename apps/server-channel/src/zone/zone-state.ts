@@ -7,6 +7,7 @@ import type {
   ZoneSnapshot,
   PlayerState,
   MobState,
+  GroundItem,
 } from '@mmo/protocol';
 
 export type PlayerAttackState =
@@ -18,9 +19,9 @@ import type { ResourceState } from '../resources/resource-system.js';
 import type { PlayerTripodLoadout } from '../combat/tripods.js';
 import {
   computeDerivedStats,
-  baseDerivedStats,
   type DerivedStats,
   type PassiveAllocation,
+  type AggregatedItemStats,
 } from '@mmo/domain';
 
 export interface ServerPlayer {
@@ -68,11 +69,19 @@ export interface ServerMob {
   burnLastAttackerId: PlayerId | null;
 }
 
+/** A dropped item lying in the world (S13). `id` is the server-issued item UUID. */
+export interface ServerGroundItem {
+  id: EntityId;
+  baseId: string;
+  pos: Vec2;
+}
+
 export interface ZoneState {
   size: Vec2;
   tileMap: number[][];
   players: Map<PlayerId, ServerPlayer>;
   mobs: Map<EntityId, ServerMob>;
+  groundItems: Map<EntityId, ServerGroundItem>;
   tick: number;
 }
 
@@ -86,6 +95,8 @@ export interface PlayerSpawnInput {
   passives?: PassiveAllocation;
   /** Equipped Pyro skill count — drives the Annihilator loadout-synergy node. */
   equippedPyroSkillCount?: number;
+  /** Aggregated stats of equipped items (S13) — folded into derivedStats. */
+  itemStats?: AggregatedItemStats;
 }
 
 export interface MobSpawnInput {
@@ -109,8 +120,45 @@ export function createZoneState(opts: { size: Vec2; tileMap: number[][] }): Zone
     tileMap: opts.tileMap,
     players: new Map(),
     mobs: new Map(),
+    groundItems: new Map(),
     tick: 0,
   };
+}
+
+// ─── Ground items (S13) ───────────────────────────────────────
+
+/** Place a dropped item in the world. The id is the server-issued item UUID. */
+export function addGroundItem(zone: ZoneState, item: ServerGroundItem): void {
+  zone.groundItems.set(item.id, { ...item, pos: { ...item.pos } });
+}
+
+export function removeGroundItem(zone: ZoneState, itemId: EntityId): ServerGroundItem | undefined {
+  const item = zone.groundItems.get(itemId);
+  if (item) zone.groundItems.delete(itemId);
+  return item;
+}
+
+/**
+ * The nearest ground item within `radius` tiles of `pos`, if any. Used for
+ * proximity-gated pickup so a player can only grab loot they're standing near.
+ */
+export function nearestGroundItem(
+  zone: ZoneState,
+  pos: Vec2,
+  radius: number
+): ServerGroundItem | undefined {
+  let best: ServerGroundItem | undefined;
+  let bestDist = radius;
+  for (const item of zone.groundItems.values()) {
+    const dx = item.pos.x - pos.x;
+    const dy = item.pos.y - pos.y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d <= bestDist) {
+      best = item;
+      bestDist = d;
+    }
+  }
+  return best;
 }
 
 export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPlayer {
@@ -119,11 +167,10 @@ export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPla
     y: Math.floor(zone.size.y / 2),
   };
   const passives = input.passives ?? {};
-  const derivedStats = input.passives
-    ? computeDerivedStats(passives, {
-        equippedPyroSkillCount: input.equippedPyroSkillCount,
-      })
-    : baseDerivedStats();
+  const derivedStats = computeDerivedStats(passives, {
+    equippedPyroSkillCount: input.equippedPyroSkillCount,
+    itemStats: input.itemStats,
+  });
   const player: ServerPlayer = {
     id: input.id,
     characterId: input.characterId,
@@ -431,5 +478,9 @@ export function snapshotZone(zone: ZoneState): ZoneSnapshot {
       burnStacks: m.burnStacks,
     });
   }
-  return { tick: zone.tick, players, mobs };
+  const groundItems: GroundItem[] = [];
+  for (const g of zone.groundItems.values()) {
+    groundItems.push({ id: g.id, baseId: g.baseId, pos: { ...g.pos } });
+  }
+  return { tick: zone.tick, players, mobs, groundItems };
 }

@@ -14,11 +14,19 @@ import {
   savePassives,
   isValidAllocation,
 } from '../passive/passive-store.js';
+import type { InventoryRepo } from '../inventory/inventory-repo.js';
+import {
+  getItemBase,
+  slotAcceptsBase,
+  aggregateItemStats,
+  computeDerivedStats,
+} from '@mmo/domain';
 
 export interface GatewayServerOptions {
   auth: AuthService;
   characters: CharacterService;
   redis: RedisClient;
+  inventory: InventoryRepo;
   /** Origin the client SPA is served from. Discord callback redirects here. */
   clientOrigin: string;
   /** WS URL of the single hardcoded channel (until S04 wires ChannelRouter). */
@@ -43,6 +51,9 @@ const CHARACTER_ERROR_STATUS: Record<CharacterError, number> = {
 const PLAY_PATH = /^\/characters\/([0-9a-f-]{36})\/play$/;
 const TRIPOD_PATH = /^\/characters\/([0-9a-f-]{36})\/tripods$/;
 const PASSIVE_PATH = /^\/characters\/([0-9a-f-]{36})\/passives$/;
+const INVENTORY_PATH = /^\/characters\/([0-9a-f-]{36})\/inventory$/;
+const EQUIP_PATH = /^\/characters\/([0-9a-f-]{36})\/equip$/;
+const UNEQUIP_PATH = /^\/characters\/([0-9a-f-]{36})\/unequip$/;
 
 function setCors(res: ServerResponse, origin: string): void {
   res.setHeader('Access-Control-Allow-Origin', origin);
@@ -72,7 +83,14 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 }
 
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
-  const { auth, characters, clientOrigin, channelWsUrl, redis } = opts;
+  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory } = opts;
+
+  // Compute the character's attribute sheet from currently-equipped items.
+  async function attributeSheet(characterId: string) {
+    const baseIds = await inventory.equippedBaseIds(characterId);
+    const stats = computeDerivedStats({}, { itemStats: aggregateItemStats(baseIds) });
+    return { attributes: stats.attributes, armor: stats.armor };
+  }
 
   return createServer(async (req, res) => {
     try {
@@ -289,6 +307,94 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
         }
         await savePassives(redis, characterId, body.allocation);
         sendJson(res, 200, { allocation: body.allocation });
+        return;
+      }
+
+      // ─── GET /characters/:id/inventory ────────────────────────
+      const invMatch = INVENTORY_PATH.exec(url.pathname);
+      if (invMatch && req.method === 'GET') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const characterId = invMatch[1]!;
+        const character = await characters.loadCharacter(session.accountId, characterId);
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        const [carried, equipped, sheet] = await Promise.all([
+          inventory.listInventory(characterId),
+          inventory.listEquipped(characterId),
+          attributeSheet(characterId),
+        ]);
+        sendJson(res, 200, { inventory: carried, equipped, ...sheet });
+        return;
+      }
+
+      // ─── POST /characters/:id/equip ───────────────────────────
+      const equipMatch = EQUIP_PATH.exec(url.pathname);
+      if (equipMatch && req.method === 'POST') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const characterId = equipMatch[1]!;
+        const character = await characters.loadCharacter(session.accountId, characterId);
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        const body = await readJsonBody<{ itemId?: string; gearSlot?: string }>(req);
+        if (!body.itemId || !body.gearSlot) {
+          sendJson(res, 400, { error: 'missing-fields' });
+          return;
+        }
+        // The item must be carried, and its base must fit the requested slot.
+        const carried = await inventory.listInventory(characterId);
+        const entry = carried.find((e) => e.itemId === body.itemId);
+        if (!entry) {
+          sendJson(res, 400, { error: 'not-in-inventory' });
+          return;
+        }
+        const base = getItemBase(entry.baseId);
+        if (!base || !slotAcceptsBase(body.gearSlot, base.slot)) {
+          sendJson(res, 400, { error: 'invalid-slot' });
+          return;
+        }
+        const result = await inventory.equip(characterId, body.itemId, body.gearSlot);
+        if (!result.ok) {
+          sendJson(res, 400, { error: result.reason });
+          return;
+        }
+        const [carried2, equipped, sheet] = await Promise.all([
+          inventory.listInventory(characterId),
+          inventory.listEquipped(characterId),
+          attributeSheet(characterId),
+        ]);
+        sendJson(res, 200, { inventory: carried2, equipped, ...sheet });
+        return;
+      }
+
+      // ─── POST /characters/:id/unequip ─────────────────────────
+      const unequipMatch = UNEQUIP_PATH.exec(url.pathname);
+      if (unequipMatch && req.method === 'POST') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const characterId = unequipMatch[1]!;
+        const character = await characters.loadCharacter(session.accountId, characterId);
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        const body = await readJsonBody<{ gearSlot?: string }>(req);
+        if (!body.gearSlot) {
+          sendJson(res, 400, { error: 'missing-fields' });
+          return;
+        }
+        await inventory.unequip(characterId, body.gearSlot);
+        const [carried, equipped, sheet] = await Promise.all([
+          inventory.listInventory(characterId),
+          inventory.listEquipped(characterId),
+          attributeSheet(characterId),
+        ]);
+        sendJson(res, 200, { inventory: carried, equipped, ...sheet });
         return;
       }
 
