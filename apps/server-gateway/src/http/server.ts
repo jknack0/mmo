@@ -9,6 +9,11 @@ import {
   saveTripods,
   validateLoadout,
 } from '../tripod/tripod-store.js';
+import {
+  loadPassives,
+  savePassives,
+  isValidAllocation,
+} from '../passive/passive-store.js';
 
 export interface GatewayServerOptions {
   auth: AuthService;
@@ -37,6 +42,7 @@ const CHARACTER_ERROR_STATUS: Record<CharacterError, number> = {
 
 const PLAY_PATH = /^\/characters\/([0-9a-f-]{36})\/play$/;
 const TRIPOD_PATH = /^\/characters\/([0-9a-f-]{36})\/tripods$/;
+const PASSIVE_PATH = /^\/characters\/([0-9a-f-]{36})\/passives$/;
 
 function setCors(res: ServerResponse, origin: string): void {
   res.setHeader('Access-Control-Allow-Origin', origin);
@@ -255,6 +261,34 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
         }
         await saveTripods(redis, characterId, body.loadout);
         sendJson(res, 200, { loadout: body.loadout });
+        return;
+      }
+
+      // ─── GET/PUT /characters/:id/passives ─────────────────────
+      const passiveMatch = PASSIVE_PATH.exec(url.pathname);
+      if (passiveMatch && (req.method === 'GET' || req.method === 'PUT')) {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const characterId = passiveMatch[1]!;
+        const character = await characters.loadCharacter(session.accountId, characterId);
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        if (req.method === 'GET') {
+          const allocation = await loadPassives(redis, characterId);
+          sendJson(res, 200, { allocation });
+          return;
+        }
+        // PUT — validateAllocation (via isValidAllocation) enforces prereq
+        // gating + the shared 20-point pool before persisting.
+        const body = await readJsonBody<{ allocation?: unknown }>(req);
+        if (!isValidAllocation(body.allocation)) {
+          sendJson(res, 400, { error: 'invalid-allocation' });
+          return;
+        }
+        await savePassives(redis, characterId, body.allocation);
+        sendJson(res, 200, { allocation: body.allocation });
         return;
       }
 

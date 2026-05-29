@@ -16,6 +16,12 @@ export type PlayerAttackState =
 
 import type { ResourceState } from '../resources/resource-system.js';
 import type { PlayerTripodLoadout } from '../combat/tripods.js';
+import {
+  computeDerivedStats,
+  baseDerivedStats,
+  type DerivedStats,
+  type PassiveAllocation,
+} from '@mmo/domain';
 
 export interface ServerPlayer {
   id: PlayerId;
@@ -35,6 +41,10 @@ export interface ServerPlayer {
   dodgeInvulUntil: number;
   /** Tripod selections per skill (per ADR-0018). Default {} = base skill. */
   tripods: PlayerTripodLoadout;
+  /** Passive allocation (ADR-0018 shared pool). Default {} = no nodes. */
+  passives: PassiveAllocation;
+  /** Folded passive effects applied throughout combat (S10 #12). */
+  derivedStats: DerivedStats;
 }
 
 export interface ServerMob {
@@ -73,6 +83,9 @@ export interface PlayerSpawnInput {
   pos?: Vec2;
   speed?: number;
   tripods?: PlayerTripodLoadout;
+  passives?: PassiveAllocation;
+  /** Equipped Pyro skill count — drives the Annihilator loadout-synergy node. */
+  equippedPyroSkillCount?: number;
 }
 
 export interface MobSpawnInput {
@@ -105,6 +118,12 @@ export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPla
     x: Math.floor(zone.size.x / 2),
     y: Math.floor(zone.size.y / 2),
   };
+  const passives = input.passives ?? {};
+  const derivedStats = input.passives
+    ? computeDerivedStats(passives, {
+        equippedPyroSkillCount: input.equippedPyroSkillCount,
+      })
+    : baseDerivedStats();
   const player: ServerPlayer = {
     id: input.id,
     characterId: input.characterId,
@@ -115,11 +134,13 @@ export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPla
     cooldowns: new Map(),
     attackState: { kind: 'idle' },
     resources: createResourceState({
-      maxSpirit: DEFAULT_MAX_SPIRIT,
+      maxSpirit: Math.round(DEFAULT_MAX_SPIRIT * derivedStats.maxSpiritMult),
       maxWrath: DEFAULT_MAX_WRATH,
     }),
     dodgeInvulUntil: 0,
     tripods: input.tripods ?? {},
+    passives,
+    derivedStats,
   };
   zone.players.set(input.id, player);
   return player;
@@ -210,20 +231,26 @@ export const BURN_TICK_INTERVAL_MS = 1_000;
 export const BURN_DAMAGE_PER_STACK = 2;
 
 /**
- * Add Burn stacks to a mob (no-op on dead mobs). Stacks cap at BURN_CAP
- * and the expiry is always refreshed to BURN_DURATION_MS from now.
+ * Add Burn stacks to a mob (no-op on dead mobs). Stacks cap at `opts.cap`
+ * (default BURN_CAP; Searing Touch raises it, Inferno passes Infinity) and the
+ * expiry is refreshed to `opts.durationMs` from now (default BURN_DURATION_MS;
+ * Lingering Heat extends it). Per S10 #12 the caller derives both from the
+ * attacker's passive stats.
  */
 export function applyBurnStacks(
   zone: ZoneState,
   mobId: EntityId,
   stacks: number,
   attackerId: PlayerId,
-  nowMs: number
+  nowMs: number,
+  opts: { cap?: number; durationMs?: number } = {}
 ): void {
   const mob = zone.mobs.get(mobId);
   if (!mob || !mob.alive) return;
-  mob.burnStacks = Math.min(BURN_CAP, mob.burnStacks + stacks);
-  mob.burnExpiresAt = nowMs + BURN_DURATION_MS;
+  const cap = opts.cap ?? BURN_CAP;
+  const durationMs = opts.durationMs ?? BURN_DURATION_MS;
+  mob.burnStacks = Math.min(cap, mob.burnStacks + stacks);
+  mob.burnExpiresAt = nowMs + durationMs;
   mob.burnLastAttackerId = attackerId;
   // First-time application: align the tick clock so the first tick lands
   // BURN_TICK_INTERVAL_MS in the future, not immediately.

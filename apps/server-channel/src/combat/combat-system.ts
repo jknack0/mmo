@@ -9,6 +9,7 @@ import {
   damageMob,
   applyBurnStacks,
   detonateBurns,
+  BURN_DURATION_MS,
   type ZoneState,
   type ServerPlayer,
 } from '../zone/zone-state.js';
@@ -33,6 +34,12 @@ export interface SkillDef {
   detonatesBurn?: boolean;
   /** Bonus per consumed Burn stack when detonating (Combust + Pyroclasm). */
   detonateBonusPerStack?: number;
+  /** Fire-school skill — scaled by passive fireDamageMult (all Pyromancy). */
+  fire?: boolean;
+  /** Explosion-type — also scaled by explosionDamageMult (Detonation node). */
+  explosion?: boolean;
+  /** Heavy nuke — cooldown scaled by heavyNukeCdMult (Overcast node). */
+  heavyNuke?: boolean;
   /** A short, player-facing name for the HUD. */
   label?: string;
 }
@@ -136,6 +143,17 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
   },
 };
 
+// School/category tags drive passive scaling (S10 #12). Applied here rather
+// than inline so the rules stay readable: every Pyromancy skill is Fire;
+// explosion- and heavy-nuke-type skills add their respective node hooks.
+const EXPLOSION_SKILLS: SkillId[] = ['fireball', 'combust', 'meteor', 'cataclysm'];
+const HEAVY_NUKE_SKILLS: SkillId[] = ['meteor', 'firestorm'];
+for (const [id, def] of Object.entries(SKILL_DEFS)) {
+  if (id !== 'basic-attack') def.fire = true;
+}
+for (const id of EXPLOSION_SKILLS) SKILL_DEFS[id]!.explosion = true;
+for (const id of HEAVY_NUKE_SKILLS) SKILL_DEFS[id]!.heavyNuke = true;
+
 export type AttackOutcome =
   | { ok: true; damage: number; fatal: boolean }
   | {
@@ -170,6 +188,54 @@ function resolveSkill(player: ServerPlayer, skillId: SkillId): SkillDef | undefi
   return applyTripod(base, sel, tripod);
 }
 
+/**
+ * Land one resolved skill on a mob, folding the attacker's passive stats
+ * (S10 #12) into damage, Burn application, and cooldown. Shared by the
+ * direct `attemptAttack` path and the FSM `advancePlayerCombat` tick so the
+ * two can never drift. Detonation happens before the base hit so a single
+ * `damageMob` call decides the fatal flag.
+ */
+function applySkillDamage(
+  zone: ZoneState,
+  attacker: ServerPlayer,
+  def: SkillDef,
+  skillId: SkillId,
+  targetId: EntityId,
+  nowMs: number
+): { fatal: boolean; applied: number } {
+  const stats = attacker.derivedStats;
+
+  let dmgMult = 1;
+  if (def.fire) dmgMult *= stats.fireDamageMult;
+  if (def.explosion) dmgMult *= stats.explosionDamageMult;
+
+  let bonus = 0;
+  if (def.detonatesBurn && def.detonateBonusPerStack) {
+    const perStack = Math.round(
+      def.detonateBonusPerStack * stats.detonatorDamagePerStackMult
+    );
+    bonus = detonateBurns(zone, targetId, perStack);
+  }
+
+  const total = Math.round(def.damage * dmgMult) + bonus;
+  const { fatal, applied } = damageMob(zone, targetId, total, nowMs);
+
+  // Flashburn (keystone) trades all Burn application for raw Pyro damage.
+  if (def.burnStacksApplied && def.burnStacksApplied > 0 && !fatal && !stats.flashburn) {
+    applyBurnStacks(zone, targetId, def.burnStacksApplied, attacker.id, nowMs, {
+      cap: stats.maxBurnStacks,
+      durationMs: Math.round(BURN_DURATION_MS * stats.burnDurationMult),
+    });
+  }
+
+  const cd = def.heavyNuke
+    ? Math.round(def.cooldownMs * stats.heavyNukeCdMult)
+    : def.cooldownMs;
+  attacker.cooldowns.set(skillId, nowMs + cd);
+  onDamageDealt(attacker.resources, applied, nowMs);
+  return { fatal, applied };
+}
+
 export function attemptAttack(
   zone: ZoneState,
   attackerId: PlayerId,
@@ -202,20 +268,7 @@ export function attemptAttack(
   if (def.spiritCost > 0) spendSpirit(attacker.resources, def.spiritCost);
   if (def.wrathCost > 0) spendWrath(attacker.resources, def.wrathCost);
 
-  // Detonate stacks (Combust / Vaporizing Pyroclasm) BEFORE the base hit so
-  // the killing blow can be either the bonus or the base — but resolution
-  // still happens through damageMob for a single fatal check.
-  let bonus = 0;
-  if (def.detonatesBurn && def.detonateBonusPerStack) {
-    bonus = detonateBurns(zone, targetId, def.detonateBonusPerStack);
-  }
-  const total = def.damage + bonus;
-  const { fatal, applied } = damageMob(zone, targetId, total, nowMs);
-  if (def.burnStacksApplied && def.burnStacksApplied > 0 && !fatal) {
-    applyBurnStacks(zone, targetId, def.burnStacksApplied, attackerId, nowMs);
-  }
-  attacker.cooldowns.set(skillId, nowMs + def.cooldownMs);
-  onDamageDealt(attacker.resources, applied, nowMs);
+  const { fatal, applied } = applySkillDamage(zone, attacker, def, skillId, targetId, nowMs);
   return { ok: true, damage: applied, fatal };
 }
 
@@ -305,17 +358,14 @@ export function advancePlayerCombat(
   if (skill.spiritCost > 0) spendSpirit(player.resources, skill.spiritCost);
   if (skill.wrathCost > 0) spendWrath(player.resources, skill.wrathCost);
 
-  let bonus = 0;
-  if (skill.detonatesBurn && skill.detonateBonusPerStack) {
-    bonus = detonateBurns(zone, state.targetId, skill.detonateBonusPerStack);
-  }
-  const total = skill.damage + bonus;
-  const { fatal, applied } = damageMob(zone, state.targetId, total, nowMs);
-  if (skill.burnStacksApplied && skill.burnStacksApplied > 0 && !fatal) {
-    applyBurnStacks(zone, state.targetId, skill.burnStacksApplied, playerId, nowMs);
-  }
-  player.cooldowns.set(state.skillId, nowMs + skill.cooldownMs);
-  onDamageDealt(player.resources, applied, nowMs);
+  const { fatal, applied } = applySkillDamage(
+    zone,
+    player,
+    skill,
+    state.skillId,
+    state.targetId,
+    nowMs
+  );
   return [
     {
       targetId: state.targetId,

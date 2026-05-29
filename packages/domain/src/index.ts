@@ -7,5 +7,6 @@
 //   - DropTable       (S13 #15)
 //   - TappingService  (S15 #17)
 //
-// Empty until S03+ slices start landing real modules.
-export {};
+// S10 (#12): Pyromancy passive tree + StatCalculator.
+export * from './passives.js';
+export * from './stat-calculator.js';
