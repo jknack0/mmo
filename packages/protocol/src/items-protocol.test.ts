@@ -35,7 +35,7 @@ describe('snapshot groundItems', () => {
       tick: 5,
       players: [],
       mobs: [],
-      groundItems: [{ id: 'i1', baseId: 'copper-ring', pos: { x: 3, y: 4 } }],
+      groundItems: [{ id: 'i1', baseId: 'copper-ring', pos: { x: 3, y: 4 }, rarity: 'white' }],
     };
     const decoded = decodeServerMessage(encodeServerMessage({ type: 'snapshot', snapshot: snap }));
     expect(decoded.type).toBe('snapshot');

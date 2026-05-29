@@ -4,6 +4,12 @@
 // the live item *instances* are server-issued UUID rows in Postgres; this file
 // is just the pure, shared definition of what each base grants.
 
+import {
+  rarityForAffixCount,
+  type Rarity,
+  type RolledAffix,
+} from './affixes.js';
+
 /** Gear slots an item can occupy. `ring` equips into one of two ring slots. */
 export type GearSlot =
   | 'weapon'
@@ -80,6 +86,8 @@ export interface ItemBase {
   name: string;
   slot: GearSlot;
   stats: ItemStats;
+  /** Unique (gold) chase item — fixed affixes in UNIQUE_AFFIXES. */
+  unique?: boolean;
 }
 
 const base = (baseId: string, name: string, slot: GearSlot, stats: ItemStats): ItemBase => ({
@@ -87,6 +95,14 @@ const base = (baseId: string, name: string, slot: GearSlot, stats: ItemStats): I
   name,
   slot,
   stats,
+});
+
+const unique = (baseId: string, name: string, slot: GearSlot, stats: ItemStats): ItemBase => ({
+  baseId,
+  name,
+  slot,
+  stats,
+  unique: true,
 });
 
 export const ITEM_BASES: ItemBase[] = [
@@ -105,9 +121,36 @@ export const ITEM_BASES: ItemBase[] = [
   // Jewelry — INT-flavored for the alpha Pyromancer.
   base('copper-ring', 'Copper Ring', 'ring', { int: 1 }),
   base('copper-amulet', 'Copper Amulet', 'neck', { int: 2, vit: 1 }),
+  // ── Uniques (gold) — fixed-stat chase items (S14). ──
+  unique('cinderheart', 'Cinderheart', 'neck', { int: 3, vit: 2 }),
+  unique('emberfang', 'Emberfang', 'weapon', { weaponDamage: 6, int: 3 }),
 ];
 
+/** Unique base ids — what a gold roll selects from. */
+export const UNIQUE_BASE_IDS: string[] = ITEM_BASES.filter((b) => b.unique).map((b) => b.baseId);
+
+const rolled = (templateId: string, kind: 'stat' | 'skill', value: number, text: string, stat?: RolledAffix['stat']): RolledAffix =>
+  ({ templateId, kind, value, text, stat });
+
+/** Fixed affixes each unique always carries (ADR-0005 named uniques). */
+export const UNIQUE_AFFIXES: Record<string, RolledAffix[]> = {
+  cinderheart: [
+    rolled('fire-pct', 'stat', 15, '+15% Fire damage', 'firePct'),
+    rolled('int-flat', 'stat', 10, '+10 Intelligence', 'int'),
+    rolled('plus-pyro-skills', 'skill', 1, '+1 to Pyromancy skills'),
+  ],
+  emberfang: [
+    rolled('fire-pct', 'stat', 12, '+12% Fire damage', 'firePct'),
+    rolled('fireball-pct', 'skill', 20, 'Fireball deals +20% damage'),
+  ],
+};
+
 const BASE_BY_ID = new Map(ITEM_BASES.map((b) => [b.baseId, b]));
+
+/** An item's rarity: gold if its base is unique, else by affix count. */
+export function rarityOf(baseId: string, affixCount: number): Rarity {
+  return BASE_BY_ID.get(baseId)?.unique ? 'gold' : rarityForAffixCount(affixCount);
+}
 
 export function getItemBase(baseId: string): ItemBase | undefined {
   return BASE_BY_ID.get(baseId);
@@ -120,10 +163,12 @@ export interface AggregatedItemStats {
   vit: number;
   weaponDamage: number;
   armor: number;
+  /** Summed +Fire damage % from affixes (percentage points). */
+  firePct: number;
 }
 
 export function emptyItemStats(): AggregatedItemStats {
-  return { str: 0, dex: 0, int: 0, vit: 0, weaponDamage: 0, armor: 0 };
+  return { str: 0, dex: 0, int: 0, vit: 0, weaponDamage: 0, armor: 0, firePct: 0 };
 }
 
 /**
@@ -132,17 +177,45 @@ export function emptyItemStats(): AggregatedItemStats {
  * passes the base ids of currently-equipped items.
  */
 export function aggregateItemStats(baseIds: string[]): AggregatedItemStats {
+  return aggregateEquipped(baseIds.map((baseId) => ({ baseId, affixes: [] })));
+}
+
+/** An equipped item instance: its base + the affixes rolled onto it. */
+export interface EquippedInstance {
+  baseId: string;
+  affixes: RolledAffix[];
+}
+
+/**
+ * Sum base stats + stat-affix values across equipped instances (S14). Skill
+ * affixes carry no `stat` and are skipped here (tooltip-only at this slice).
+ */
+export function aggregateEquipped(items: EquippedInstance[]): AggregatedItemStats {
   const out = emptyItemStats();
-  for (const id of baseIds) {
-    const b = BASE_BY_ID.get(id);
-    if (!b) continue;
-    const s = b.stats;
-    out.str += s.str ?? 0;
-    out.dex += s.dex ?? 0;
-    out.int += s.int ?? 0;
-    out.vit += s.vit ?? 0;
-    out.weaponDamage += s.weaponDamage ?? 0;
-    out.armor += s.armor ?? 0;
+  const addStat = (stat: string | undefined, value: number) => {
+    switch (stat) {
+      case 'str': out.str += value; break;
+      case 'dex': out.dex += value; break;
+      case 'int': out.int += value; break;
+      case 'vit': out.vit += value; break;
+      case 'weaponDamage': out.weaponDamage += value; break;
+      case 'armor': out.armor += value; break;
+      case 'firePct': out.firePct += value; break;
+    }
+  };
+  for (const item of items) {
+    const b = BASE_BY_ID.get(item.baseId);
+    if (b) {
+      out.str += b.stats.str ?? 0;
+      out.dex += b.stats.dex ?? 0;
+      out.int += b.stats.int ?? 0;
+      out.vit += b.stats.vit ?? 0;
+      out.weaponDamage += b.stats.weaponDamage ?? 0;
+      out.armor += b.stats.armor ?? 0;
+    }
+    for (const aff of item.affixes ?? []) {
+      if (aff.kind === 'stat') addStat(aff.stat, aff.value);
+    }
   }
   return out;
 }

@@ -4,7 +4,7 @@
 
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import type { ServerMessage, Vec2, GroundItem } from '@mmo/protocol';
-import { getItemBase } from '@mmo/domain';
+import { getItemBase, RARITY_COLOR, type Rarity } from '@mmo/domain';
 import { createChannelClient, type ChannelClient } from '../network/channel-client.js';
 import {
   createSnapshotInterpolator,
@@ -112,17 +112,22 @@ export async function mountWorldScene(
   const requestedPickups = new Set<string>();
   const PICKUP_TILE_RADIUS = 1.2;
 
-  function makeGroundSprite(baseId: string): Container {
+  function makeGroundSprite(baseId: string, rarity: string): Container {
     const c = new Container();
     c.eventMode = 'static';
     c.cursor = 'pointer';
+    // Constant rarity color (CONTEXT glossary) — never the zone palette.
+    const color = Number.parseInt(
+      (RARITY_COLOR[rarity as Rarity] ?? '#ffe08a').slice(1),
+      16
+    );
     const gem = new Graphics()
       .poly([0, -7, 6, 0, 0, 7, -6, 0])
-      .fill({ color: 0xffe08a })
-      .stroke({ color: 0x6b4a12, width: 1.5 });
+      .fill({ color })
+      .stroke({ color: 0x1a1208, width: 1.5 });
     const label = new Text({
       text: getItemBase(baseId)?.name ?? baseId,
-      style: { fontSize: 9, fill: 0xffe08a, stroke: { color: 0x000000, width: 3 } },
+      style: { fontSize: 9, fill: color, stroke: { color: 0x000000, width: 3 } },
     });
     label.anchor.set(0.5, 1);
     label.y = -10;
@@ -456,7 +461,7 @@ export async function mountWorldScene(
       seenG.add(gi.id);
       let sprite = groundSprites.get(gi.id);
       if (!sprite) {
-        sprite = makeGroundSprite(gi.baseId);
+        sprite = makeGroundSprite(gi.baseId, gi.rarity);
         sprite.on('pointerdown', (e) => {
           e.stopPropagation();
           client.send({ type: 'pickup', itemId: gi.id });

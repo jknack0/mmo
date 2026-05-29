@@ -46,6 +46,8 @@ export interface DerivedStats {
   armor: number;
   /** Flat bonus added to weapon (basic-attack) damage. */
   weaponDamageBonus: number;
+  /** Character-level Magic Find % (ADR-0005 — never a gear affix). */
+  magicFind: number;
 }
 
 export interface StatContext {
@@ -53,8 +55,10 @@ export interface StatContext {
   equippedPyroSkillCount?: number;
   /** Override the base Burn cap (defaults to DEFAULT_BURN_STACK_CAP). */
   baseBurnStackCap?: number;
-  /** Aggregated flat stats of currently-equipped items (S13). */
+  /** Aggregated flat stats of currently-equipped items (S13/S14). */
   itemStats?: AggregatedItemStats;
+  /** Character-level Magic Find % baseline (S14). Not sourced from gear. */
+  magicFind?: number;
 }
 
 export function baseDerivedStats(cap: number = DEFAULT_BURN_STACK_CAP): DerivedStats {
@@ -76,6 +80,7 @@ export function baseDerivedStats(cap: number = DEFAULT_BURN_STACK_CAP): DerivedS
     attributes: { str: 0, dex: 0, int: 0, vit: 0 },
     armor: 0,
     weaponDamageBonus: 0,
+    magicFind: 0,
   };
 }
 
@@ -158,17 +163,20 @@ export function computeDerivedStats(
     equippedPyroSkillCount: ctx.equippedPyroSkillCount ?? 6,
     baseBurnStackCap: ctx.baseBurnStackCap ?? DEFAULT_BURN_STACK_CAP,
     itemStats: ctx.itemStats ?? emptyItemStats(),
+    magicFind: ctx.magicFind ?? 0,
   };
   const s = baseDerivedStats(resolved.baseBurnStackCap);
 
-  // Equipped gear (S13): surface attributes + armor + weapon damage, and map
-  // INT into fire damage (Pyromancy scales off INT). Applied before passives
-  // fold so all fireDamageMult contributions accumulate additively.
+  // Equipped gear (S13/S14): surface attributes + armor + weapon damage, map
+  // INT into fire damage (Pyromancy scales off INT), and add the +Fire% from
+  // affixes. Applied before passives fold so fireDamageMult accumulates
+  // additively. Magic Find is a character-level baseline, never from gear.
   const items = resolved.itemStats;
   s.attributes = { str: items.str, dex: items.dex, int: items.int, vit: items.vit };
   s.armor = items.armor;
   s.weaponDamageBonus = items.weaponDamage;
-  s.fireDamageMult += items.int * INT_FIRE_DMG_PER_POINT;
+  s.fireDamageMult += items.int * INT_FIRE_DMG_PER_POINT + items.firePct / 100;
+  s.magicFind = resolved.magicFind;
 
   let infernoTaken = false;
   for (const [id, ranks] of Object.entries(alloc)) {

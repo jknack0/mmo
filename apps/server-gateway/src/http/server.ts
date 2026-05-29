@@ -18,7 +18,7 @@ import type { InventoryRepo } from '../inventory/inventory-repo.js';
 import {
   getItemBase,
   slotAcceptsBase,
-  aggregateItemStats,
+  aggregateEquipped,
   computeDerivedStats,
 } from '@mmo/domain';
 
@@ -85,11 +85,12 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
   const { auth, characters, clientOrigin, channelWsUrl, redis, inventory } = opts;
 
-  // Compute the character's attribute sheet from currently-equipped items.
+  // Compute the character's attribute sheet from currently-equipped items
+  // (base stats + stat affixes), plus the Magic Find baseline (S14).
   async function attributeSheet(characterId: string) {
-    const baseIds = await inventory.equippedBaseIds(characterId);
-    const stats = computeDerivedStats({}, { itemStats: aggregateItemStats(baseIds) });
-    return { attributes: stats.attributes, armor: stats.armor };
+    const instances = await inventory.equippedInstances(characterId);
+    const stats = computeDerivedStats({}, { itemStats: aggregateEquipped(instances) });
+    return { attributes: stats.attributes, armor: stats.armor, magicFind: stats.magicFind };
   }
 
   return createServer(async (req, res) => {

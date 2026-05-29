@@ -120,7 +120,9 @@ describe('inventory + equip HTTP', () => {
       attributes: { int: number };
     };
     expect(body.inventory).toEqual([]);
-    expect(body.equipped).toEqual([{ itemId, baseId: 'apprentice-wand', gearSlot: 'weapon' }]);
+    expect(body.equipped).toEqual([
+      { itemId, baseId: 'apprentice-wand', gearSlot: 'weapon', affixes: [], rarity: 'white' },
+    ]);
     expect(body.attributes.int).toBe(4);
   });
 

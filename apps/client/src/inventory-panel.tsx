@@ -11,8 +11,11 @@ import {
   fetchInventory,
   equipItem,
   unequipItem,
+  RARITY_COLOR,
   type InventoryView,
   type EquippedEntry,
+  type Rarity,
+  type RolledAffix,
 } from './inventory.js';
 
 export interface InventoryPanelProps {
@@ -44,12 +47,35 @@ function statLine(baseId: string): string {
     .join('  ');
 }
 
+/** Rarity-colored name + base stats + affix lines (D2-style tooltip body). */
+function ItemTooltip(props: { baseId: string; rarity: Rarity; affixes: RolledAffix[] }) {
+  return (
+    <>
+      <div class="text-sm font-medium" style={{ color: RARITY_COLOR[props.rarity] }}>
+        {getItemBase(props.baseId)?.name ?? props.baseId}
+      </div>
+      <div class="text-[10px] text-white/45">{statLine(props.baseId)}</div>
+      <For each={props.affixes}>
+        {(a) => (
+          <div
+            class="text-[11px]"
+            style={{ color: a.kind === 'stat' ? '#9fd2ff' : '#caa8ff' }}
+          >
+            {a.text}
+          </div>
+        )}
+      </For>
+    </>
+  );
+}
+
 export function InventoryPanel(props: InventoryPanelProps) {
   const [view, setView] = createSignal<InventoryView>({
     inventory: [],
     equipped: [],
     attributes: { str: 0, dex: 0, int: 0, vit: 0 },
     armor: 0,
+    magicFind: 0,
   });
   const [busy, setBusy] = createSignal(false);
 
@@ -141,10 +167,7 @@ export function InventoryPanel(props: InventoryPanelProps) {
                         {SLOT_LABEL[slot]}
                       </div>
                       <Show when={eq()} fallback={<div class="text-xs text-white/25">empty</div>}>
-                        <div class="text-sm text-white font-medium">
-                          {getItemBase(eq()!.baseId)?.name ?? eq()!.baseId}
-                        </div>
-                        <div class="text-[10px] text-amber-300/80">{statLine(eq()!.baseId)}</div>
+                        <ItemTooltip baseId={eq()!.baseId} rarity={eq()!.rarity} affixes={eq()!.affixes} />
                       </Show>
                     </button>
                   );
@@ -169,12 +192,10 @@ export function InventoryPanel(props: InventoryPanelProps) {
                       type="button"
                       disabled={busy()}
                       onClick={() => onEquip(it.itemId, it.baseId)}
-                      class="text-left rounded-lg px-3 py-2 border-2 border-white/15 bg-white/[0.04] hover:border-amber-400/60 hover:brightness-110 cursor-pointer transition-all"
+                      class="text-left rounded-lg px-3 py-2 border-2 bg-white/[0.04] hover:brightness-110 cursor-pointer transition-all"
+                      style={{ 'border-color': `${RARITY_COLOR[it.rarity]}66` }}
                     >
-                      <div class="text-sm text-white font-medium">
-                        {getItemBase(it.baseId)?.name ?? it.baseId}
-                      </div>
-                      <div class="text-[10px] text-white/50">{statLine(it.baseId)}</div>
+                      <ItemTooltip baseId={it.baseId} rarity={it.rarity} affixes={it.affixes} />
                     </button>
                   )}
                 </For>
@@ -191,9 +212,11 @@ export function InventoryPanel(props: InventoryPanelProps) {
                 <Stat label="Intelligence" value={attr().int} color="#6ab0ff" />
                 <Stat label="Vitality" value={attr().vit} color="#ffd24a" />
                 <Stat label="Armor" value={view().armor} color="#cbd5e1" />
+                <Stat label="Magic Find" value={view().magicFind} color="#ff9f1a" />
               </div>
               <p class="text-[10px] text-white/30 mt-3">
-                INT raises Fire damage · weapon damage feeds your attacks.
+                INT + Fire% affixes raise Fire damage · weapon damage feeds your attacks ·
+                Magic Find improves drop rarity (character stat, never gear).
               </p>
             </div>
           </div>

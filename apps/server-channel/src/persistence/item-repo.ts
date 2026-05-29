@@ -9,14 +9,20 @@
 
 import type { Kysely } from 'kysely';
 import type { ChannelDatabase } from '../db/types.js';
+import type { RolledAffix } from '@mmo/domain';
+
+export interface ChannelEquippedInstance {
+  baseId: string;
+  affixes: RolledAffix[];
+}
 
 export interface ChannelItemRepo {
   /** Mint a dropped item with no owner. Returns its server-issued UUID. */
-  createDroppedItem(baseId: string): Promise<string>;
+  createDroppedItem(baseId: string, affixes?: RolledAffix[]): Promise<string>;
   /** Pick up: assign ownership and stash in the first free inventory slot. */
   pickUp(characterId: string, itemId: string): Promise<number>;
-  /** Base ids of the character's equipped items (for StatCalculator). */
-  equippedBaseIds(characterId: string): Promise<string[]>;
+  /** Equipped items (base + affixes) for StatCalculator on Hello. */
+  equippedInstances(characterId: string): Promise<ChannelEquippedInstance[]>;
 }
 
 function firstFreeSlot(used: number[]): number {
@@ -28,10 +34,10 @@ function firstFreeSlot(used: number[]): number {
 
 export function createChannelItemRepo(db: Kysely<ChannelDatabase>): ChannelItemRepo {
   return {
-    async createDroppedItem(baseId) {
+    async createDroppedItem(baseId, affixes = []) {
       const row = await db
         .insertInto('items')
-        .values({ base_id: baseId, owner_character_id: null })
+        .values({ base_id: baseId, owner_character_id: null, affixes: JSON.stringify(affixes) })
         .returning('id')
         .executeTakeFirstOrThrow();
       return row.id;
@@ -58,14 +64,14 @@ export function createChannelItemRepo(db: Kysely<ChannelDatabase>): ChannelItemR
       });
     },
 
-    async equippedBaseIds(characterId) {
+    async equippedInstances(characterId) {
       const rows = await db
         .selectFrom('equipped')
         .innerJoin('items', 'items.id', 'equipped.item_id')
-        .select('items.base_id as baseId')
+        .select(['items.base_id as baseId', 'items.affixes as affixes'])
         .where('equipped.character_id', '=', characterId)
         .execute();
-      return rows.map((r) => r.baseId);
+      return rows.map((r) => ({ baseId: r.baseId, affixes: (r.affixes ?? []) as RolledAffix[] }));
     },
   };
 }

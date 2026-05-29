@@ -13,3 +13,5 @@ export * from './stat-calculator.js';
 // S13 (#15): items + drops.
 export * from './items.js';
 export * from './drop-table.js';
+// S14 (#16): affixes + rarity.
+export * from './affixes.js';
