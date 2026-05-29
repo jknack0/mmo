@@ -69,11 +69,13 @@ export interface ServerMob {
   burnLastAttackerId: PlayerId | null;
 }
 
-/** A dropped item lying in the world (S13). `id` is the server-issued item UUID. */
+/** A dropped item lying in the world (S13/S14). `id` is the server-issued item UUID. */
 export interface ServerGroundItem {
   id: EntityId;
   baseId: string;
   pos: Vec2;
+  /** Rarity tier for constant-color client rendering. */
+  rarity: string;
 }
 
 export interface ZoneState {
@@ -480,7 +482,7 @@ export function snapshotZone(zone: ZoneState): ZoneSnapshot {
   }
   const groundItems: GroundItem[] = [];
   for (const g of zone.groundItems.values()) {
-    groundItems.push({ id: g.id, baseId: g.baseId, pos: { ...g.pos } });
+    groundItems.push({ id: g.id, baseId: g.baseId, pos: { ...g.pos }, rarity: g.rarity });
   }
   return { tick: zone.tick, players, mobs, groundItems };
 }

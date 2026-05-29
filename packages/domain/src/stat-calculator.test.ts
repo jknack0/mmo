@@ -8,7 +8,7 @@ import {
   DEFAULT_BURN_STACK_CAP,
   type DerivedStats,
 } from './stat-calculator.js';
-import { aggregateItemStats } from './items.js';
+import { aggregateItemStats, aggregateEquipped } from './items.js';
 import type { PassiveAllocation } from './passives.js';
 
 const alloc = (...ids: string[]): PassiveAllocation =>
@@ -179,6 +179,39 @@ describe('equipped item stats (S13)', () => {
 
   it('no item stats → identity (equals base)', () => {
     expect(computeDerivedStats({})).toEqual(baseDerivedStats());
+  });
+});
+
+describe('affixes + magic find (S14)', () => {
+  it('base magicFind is 0', () => {
+    expect(baseDerivedStats().magicFind).toBe(0);
+  });
+
+  it('a +Fire% affix raises fireDamageMult', () => {
+    const itemStats = aggregateEquipped([
+      { baseId: 'leather-vest', affixes: [
+        { templateId: 'fire-pct', kind: 'stat', stat: 'firePct', value: 12, text: '+12% Fire damage' },
+      ] },
+    ]);
+    const s = computeDerivedStats({}, { itemStats });
+    expect(s.fireDamageMult).toBeCloseTo(1.12);
+  });
+
+  it('INT and +Fire% stack additively into fire damage', () => {
+    const itemStats = aggregateEquipped([
+      { baseId: 'apprentice-orb', affixes: [ // base int 3
+        { templateId: 'int-flat', kind: 'stat', stat: 'int', value: 7, text: '+7 Intelligence' },
+        { templateId: 'fire-pct', kind: 'stat', stat: 'firePct', value: 15, text: '+15% Fire damage' },
+      ] },
+    ]);
+    const s = computeDerivedStats({}, { itemStats });
+    // int 10 → +0.10, firePct 15 → +0.15
+    expect(s.attributes.int).toBe(10);
+    expect(s.fireDamageMult).toBeCloseTo(1.25);
+  });
+
+  it('Magic Find baseline passes through to the sheet', () => {
+    expect(computeDerivedStats({}, { magicFind: 50 }).magicFind).toBe(50);
   });
 });
 

@@ -11,7 +11,7 @@ import {
   type Vec2,
   type PlayerId,
 } from '@mmo/protocol';
-import { rollDrop, aggregateItemStats } from '@mmo/domain';
+import { rollItemDrop, aggregateEquipped, rarityOf } from '@mmo/domain';
 import {
   createZoneState,
   spawnPlayer,
@@ -135,10 +135,10 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       // (Postgres) so S09/S10/S13 selections take effect from the first cast.
       // equippedPyroSkillCount defaults to the full 6-of-6 Pyro hotbar at
       // alpha (drives Annihilator).
-      const [tripods, passives, equippedBaseIds] = await Promise.all([
+      const [tripods, passives, equipped] = await Promise.all([
         loadTripods(opts.redis, msg.characterId),
         loadPassives(opts.redis, msg.characterId),
-        itemRepo ? itemRepo.equippedBaseIds(msg.characterId) : Promise.resolve([]),
+        itemRepo ? itemRepo.equippedInstances(msg.characterId) : Promise.resolve([]),
       ]);
       spawnPlayer(zone, {
         id: playerId,
@@ -146,7 +146,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         name: msg.name,
         tripods,
         passives,
-        itemStats: aggregateItemStats(equippedBaseIds),
+        itemStats: aggregateEquipped(equipped),
       });
       send(ws, {
         type: 'welcome',
@@ -213,19 +213,22 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
   }
 
   /**
-   * Roll the drop table for a freshly-killed mob and, on a hit, mint a
-   * server-issued item (write-through) before placing it on the ground.
+   * Roll the loot table for a freshly-killed mob (rarity + affixes, biased by
+   * the killer's Magic Find) and, on a hit, mint a server-issued item
+   * (write-through) before placing it on the ground with its rarity.
    */
-  function maybeDropLoot(mobId: string): void {
+  function maybeDropLoot(mobId: string, killerId: string): void {
     if (!itemRepo) return;
     const mob = zone.mobs.get(mobId);
     if (!mob) return;
-    const baseId = rollDrop(mob.kind, Math.random());
-    if (!baseId) return;
+    const magicFind = zone.players.get(killerId)?.derivedStats.magicFind ?? 0;
+    const drop = rollItemDrop(mob.kind, Math.random, magicFind);
+    if (!drop) return;
     const pos = { ...mob.pos };
+    const rarity = rarityOf(drop.baseId, drop.affixes.length);
     itemRepo
-      .createDroppedItem(baseId)
-      .then((id) => addGroundItem(zone, { id, baseId, pos }))
+      .createDroppedItem(drop.baseId, drop.affixes)
+      .then((id) => addGroundItem(zone, { id, baseId: drop.baseId, pos, rarity }))
       .catch((err) => console.error('[channel] drop mint failed:', err));
   }
 
@@ -242,13 +245,13 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       const events = advancePlayerCombat(zone, player.id, now);
       for (const ev of events) {
         broadcast({ type: 'damage', event: ev });
-        if (ev.fatal) maybeDropLoot(ev.targetId);
+        if (ev.fatal) maybeDropLoot(ev.targetId, ev.attackerId);
       }
     }
     // Burn DoT — ticks once per second per active stack-set.
     for (const ev of stepBurns(zone, now)) {
       broadcast({ type: 'damage', event: ev });
-      if (ev.fatal) maybeDropLoot(ev.targetId);
+      if (ev.fatal) maybeDropLoot(ev.targetId, ev.attackerId);
     }
     stepMovement(zone, dtSec);
     stepMobs(zone, now);

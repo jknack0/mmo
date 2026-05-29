@@ -205,16 +205,16 @@ describe('snapshotZone', () => {
 describe('Ground items (S13)', () => {
   it('adds and snapshots a ground item', () => {
     const zone = tinyZone();
-    addGroundItem(zone, { id: 'item-1', baseId: 'copper-ring', pos: { x: 2, y: 3 } });
+    addGroundItem(zone, { id: 'item-1', baseId: 'copper-ring', pos: { x: 2, y: 3 }, rarity: 'white' });
     const snap = snapshotZone(zone);
     expect(snap.groundItems).toEqual([
-      { id: 'item-1', baseId: 'copper-ring', pos: { x: 2, y: 3 } },
+      { id: 'item-1', baseId: 'copper-ring', pos: { x: 2, y: 3 }, rarity: 'white' },
     ]);
   });
 
   it('removes a ground item and returns it', () => {
     const zone = tinyZone();
-    addGroundItem(zone, { id: 'item-1', baseId: 'rusty-sword', pos: { x: 1, y: 1 } });
+    addGroundItem(zone, { id: 'item-1', baseId: 'rusty-sword', pos: { x: 1, y: 1 }, rarity: 'blue' });
     const removed = removeGroundItem(zone, 'item-1');
     expect(removed?.baseId).toBe('rusty-sword');
     expect(zone.groundItems.size).toBe(0);
@@ -223,8 +223,8 @@ describe('Ground items (S13)', () => {
 
   it('finds the nearest ground item within radius only', () => {
     const zone = tinyZone();
-    addGroundItem(zone, { id: 'near', baseId: 'copper-ring', pos: { x: 1, y: 1 } });
-    addGroundItem(zone, { id: 'far', baseId: 'rusty-sword', pos: { x: 4, y: 4 } });
+    addGroundItem(zone, { id: 'near', baseId: 'copper-ring', pos: { x: 1, y: 1 }, rarity: 'white' });
+    addGroundItem(zone, { id: 'far', baseId: 'rusty-sword', pos: { x: 4, y: 4 }, rarity: 'white' });
     const found = nearestGroundItem(zone, { x: 1, y: 1.4 }, 1.5);
     expect(found?.id).toBe('near');
     // nothing within radius

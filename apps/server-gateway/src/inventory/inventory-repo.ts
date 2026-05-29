@@ -9,17 +9,28 @@
 
 import type { Kysely } from 'kysely';
 import type { Database } from '../db/types.js';
+import { rarityOf, type RolledAffix, type Rarity } from '@mmo/domain';
 
 export interface InventoryEntry {
   itemId: string;
   baseId: string;
   slot: number;
+  affixes: RolledAffix[];
+  rarity: Rarity;
 }
 
 export interface EquippedEntry {
   itemId: string;
   baseId: string;
   gearSlot: string;
+  affixes: RolledAffix[];
+  rarity: Rarity;
+}
+
+/** Base + affixes of an equipped item — folded into stats by StatCalculator. */
+export interface EquippedInstance {
+  baseId: string;
+  affixes: RolledAffix[];
 }
 
 export type EquipResult =
@@ -27,12 +38,12 @@ export type EquipResult =
   | { ok: false; reason: 'not-in-inventory' };
 
 export interface InventoryRepo {
-  createItem(baseId: string, ownerCharacterId: string | null): Promise<string>;
-  grantItem(characterId: string, baseId: string): Promise<{ itemId: string; slot: number }>;
+  createItem(baseId: string, ownerCharacterId: string | null, affixes?: RolledAffix[]): Promise<string>;
+  grantItem(characterId: string, baseId: string, affixes?: RolledAffix[]): Promise<{ itemId: string; slot: number }>;
   stashItem(characterId: string, itemId: string): Promise<number>;
   listInventory(characterId: string): Promise<InventoryEntry[]>;
   listEquipped(characterId: string): Promise<EquippedEntry[]>;
-  equippedBaseIds(characterId: string): Promise<string[]>;
+  equippedInstances(characterId: string): Promise<EquippedInstance[]>;
   equip(characterId: string, itemId: string, gearSlot: string): Promise<EquipResult>;
   unequip(characterId: string, gearSlot: string): Promise<boolean>;
 }
@@ -59,17 +70,21 @@ export function createInventoryRepo(db: Kysely<Database>): InventoryRepo {
   }
 
   return {
-    async createItem(baseId, ownerCharacterId) {
+    async createItem(baseId, ownerCharacterId, affixes = []) {
       const row = await db
         .insertInto('items')
-        .values({ base_id: baseId, owner_character_id: ownerCharacterId })
+        .values({
+          base_id: baseId,
+          owner_character_id: ownerCharacterId,
+          affixes: JSON.stringify(affixes),
+        })
         .returning('id')
         .executeTakeFirstOrThrow();
       return row.id;
     },
 
-    async grantItem(characterId, baseId) {
-      const itemId = await this.createItem(baseId, characterId);
+    async grantItem(characterId, baseId, affixes = []) {
+      const itemId = await this.createItem(baseId, characterId, affixes);
       const slot = await this.stashItem(characterId, itemId);
       return { itemId, slot };
     },
@@ -94,11 +109,19 @@ export function createInventoryRepo(db: Kysely<Database>): InventoryRepo {
       const rows = await db
         .selectFrom('inventory')
         .innerJoin('items', 'items.id', 'inventory.item_id')
-        .select(['inventory.item_id as itemId', 'items.base_id as baseId', 'inventory.slot as slot'])
+        .select([
+          'inventory.item_id as itemId',
+          'items.base_id as baseId',
+          'inventory.slot as slot',
+          'items.affixes as affixes',
+        ])
         .where('inventory.character_id', '=', characterId)
         .orderBy('inventory.slot')
         .execute();
-      return rows as InventoryEntry[];
+      return rows.map((r) => {
+        const affixes = (r.affixes ?? []) as RolledAffix[];
+        return { itemId: r.itemId, baseId: r.baseId, slot: r.slot, affixes, rarity: rarityOf(r.baseId, affixes.length) };
+      });
     },
 
     async listEquipped(characterId) {
@@ -109,20 +132,24 @@ export function createInventoryRepo(db: Kysely<Database>): InventoryRepo {
           'equipped.item_id as itemId',
           'items.base_id as baseId',
           'equipped.gear_slot as gearSlot',
+          'items.affixes as affixes',
         ])
         .where('equipped.character_id', '=', characterId)
         .execute();
-      return rows as EquippedEntry[];
+      return rows.map((r) => {
+        const affixes = (r.affixes ?? []) as RolledAffix[];
+        return { itemId: r.itemId, baseId: r.baseId, gearSlot: r.gearSlot, affixes, rarity: rarityOf(r.baseId, affixes.length) };
+      });
     },
 
-    async equippedBaseIds(characterId) {
+    async equippedInstances(characterId) {
       const rows = await db
         .selectFrom('equipped')
         .innerJoin('items', 'items.id', 'equipped.item_id')
-        .select('items.base_id as baseId')
+        .select(['items.base_id as baseId', 'items.affixes as affixes'])
         .where('equipped.character_id', '=', characterId)
         .execute();
-      return rows.map((r) => r.baseId);
+      return rows.map((r) => ({ baseId: r.baseId, affixes: (r.affixes ?? []) as RolledAffix[] }));
     },
 
     async equip(characterId, itemId, gearSlot) {

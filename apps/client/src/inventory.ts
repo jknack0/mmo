@@ -8,10 +8,14 @@ export {
   GEAR_SLOTS,
   getItemBase,
   slotAcceptsBase,
+  RARITY_COLOR,
   type GearSlot,
   type EquipSlot,
   type ItemBase,
+  type Rarity,
+  type RolledAffix,
 } from '@mmo/domain';
+import type { RolledAffix, Rarity } from '@mmo/domain';
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ?? 'http://localhost:8080';
 
@@ -19,11 +23,15 @@ export interface InventoryEntry {
   itemId: string;
   baseId: string;
   slot: number;
+  affixes: RolledAffix[];
+  rarity: Rarity;
 }
 export interface EquippedEntry {
   itemId: string;
   baseId: string;
   gearSlot: string;
+  affixes: RolledAffix[];
+  rarity: Rarity;
 }
 export interface Attributes {
   str: number;
@@ -36,6 +44,7 @@ export interface InventoryView {
   equipped: EquippedEntry[];
   attributes: Attributes;
   armor: number;
+  magicFind: number;
 }
 
 const EMPTY: InventoryView = {
@@ -43,6 +52,7 @@ const EMPTY: InventoryView = {
   equipped: [],
   attributes: { str: 0, dex: 0, int: 0, vit: 0 },
   armor: 0,
+  magicFind: 0,
 };
 
 export async function fetchInventory(token: string, characterId: string): Promise<InventoryView> {

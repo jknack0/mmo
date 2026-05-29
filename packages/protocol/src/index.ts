@@ -40,12 +40,14 @@ export interface MobState {
   burnStacks?: number;
 }
 
-/** A dropped item lying in the world, awaiting pickup (S13). */
+/** A dropped item lying in the world, awaiting pickup (S13/S14). */
 export interface GroundItem {
   /** Server-issued item UUID (ADR-0013). */
   id: EntityId;
   baseId: string;
   pos: Vec2;
+  /** Rarity tier ('white'|'blue'|'yellow'|'gold') for constant-color rendering. */
+  rarity: string;
 }
 
 export interface ZoneSnapshot {

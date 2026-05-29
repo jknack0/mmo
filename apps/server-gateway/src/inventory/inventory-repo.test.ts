@@ -68,8 +68,10 @@ describe('InventoryRepo', () => {
     expect(res).toEqual({ ok: true, unequipped: null });
     expect(await repo.listInventory(characterId)).toEqual([]);
     const eq = await repo.listEquipped(characterId);
-    expect(eq).toEqual([{ itemId, baseId: 'rusty-sword', gearSlot: 'weapon' }]);
-    expect(await repo.equippedBaseIds(characterId)).toEqual(['rusty-sword']);
+    expect(eq).toEqual([
+      { itemId, baseId: 'rusty-sword', gearSlot: 'weapon', affixes: [], rarity: 'white' },
+    ]);
+    expect((await repo.equippedInstances(characterId)).map((e) => e.baseId)).toEqual(['rusty-sword']);
   });
 
   it('equip rejects an item not in the inventory', async () => {
@@ -84,7 +86,7 @@ describe('InventoryRepo', () => {
     await repo.equip(characterId, a.itemId, 'weapon');
     const res = await repo.equip(characterId, b.itemId, 'weapon');
     expect(res).toEqual({ ok: true, unequipped: a.itemId });
-    expect(await repo.equippedBaseIds(characterId)).toEqual(['apprentice-wand']);
+    expect((await repo.equippedInstances(characterId)).map((e) => e.baseId)).toEqual(['apprentice-wand']);
     const inv = await repo.listInventory(characterId);
     expect(inv.map((e) => e.itemId)).toEqual([a.itemId]); // old weapon back in bag
   });
@@ -108,6 +110,20 @@ describe('InventoryRepo', () => {
     const r2 = await repo.grantItem(characterId, 'copper-ring');
     expect((await repo.equip(characterId, r1.itemId, 'ring-1')).ok).toBe(true);
     expect((await repo.equip(characterId, r2.itemId, 'ring-2')).ok).toBe(true);
-    expect(await repo.equippedBaseIds(characterId)).toEqual(['copper-ring', 'copper-ring']);
+    expect((await repo.equippedInstances(characterId)).map((e) => e.baseId)).toEqual(['copper-ring', 'copper-ring']);
+  });
+
+  it('round-trips affixes + derives rarity on a dropped item', async () => {
+    const affixes = [
+      { templateId: 'int-flat', kind: 'stat' as const, stat: 'int' as const, value: 7, text: '+7 Intelligence' },
+      { templateId: 'fire-pct', kind: 'stat' as const, stat: 'firePct' as const, value: 12, text: '+12% Fire damage' },
+    ];
+    const { itemId } = await repo.grantItem(characterId, 'apprentice-wand', affixes);
+    const inv = await repo.listInventory(characterId);
+    const entry = inv.find((e) => e.itemId === itemId)!;
+    expect(entry.affixes).toEqual(affixes);
+    expect(entry.rarity).toBe('blue'); // 2 affixes
+    const inst = await repo.equippedInstances(characterId);
+    expect(inst).toEqual([]); // still in bag, not equipped
   });
 });
