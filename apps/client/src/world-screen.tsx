@@ -8,6 +8,7 @@ import { connect } from './network/gateway-client.js';
 import { mountWorldScene, type LocalPlayerStats } from './world/world-scene.js';
 import { TripodPanel } from './tripod-panel.js';
 import { PassiveTreePanel } from './passive-tree-panel.js';
+import { InventoryPanel } from './inventory-panel.js';
 
 export interface WorldScreenProps {
   sessionToken: string;
@@ -71,6 +72,8 @@ export function WorldScreen(props: WorldScreenProps) {
   const [stats, setStats] = createSignal<LocalPlayerStats>(DEFAULT_STATS);
   const [showTripods, setShowTripods] = createSignal(false);
   const [showPassives, setShowPassives] = createSignal(false);
+  const [showInventory, setShowInventory] = createSignal(false);
+  const [pickupKey, setPickupKey] = createSignal(0);
   let mountEl: HTMLDivElement | undefined;
   let cleanup: (() => void) | null = null;
 
@@ -86,6 +89,7 @@ export function WorldScreen(props: WorldScreenProps) {
         characterName: info.character.name,
         onDisconnected: () => setError('Disconnected from channel.'),
         onStats: setStats,
+        onPickup: () => setPickupKey((k) => k + 1),
       });
     } catch (e) {
       setError((e as Error).message);
@@ -157,6 +161,13 @@ export function WorldScreen(props: WorldScreenProps) {
         <button
           type="button"
           class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
+          onClick={() => setShowInventory(true)}
+        >
+          Inventory
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
           onClick={props.onLeave}
         >
           Back
@@ -183,6 +194,15 @@ export function WorldScreen(props: WorldScreenProps) {
           token={props.sessionToken}
           characterId={props.character.id}
           onClose={() => setShowPassives(false)}
+        />
+      </Show>
+
+      <Show when={showInventory()}>
+        <InventoryPanel
+          token={props.sessionToken}
+          characterId={props.character.id}
+          refreshKey={pickupKey()}
+          onClose={() => setShowInventory(false)}
         />
       </Show>
 

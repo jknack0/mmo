@@ -3,7 +3,8 @@
 // Single public entry: `mountWorldScene(container, opts) → cleanup`.
 
 import { Application, Container, Graphics, Text } from 'pixi.js';
-import type { ServerMessage, Vec2 } from '@mmo/protocol';
+import type { ServerMessage, Vec2, GroundItem } from '@mmo/protocol';
+import { getItemBase } from '@mmo/domain';
 import { createChannelClient, type ChannelClient } from '../network/channel-client.js';
 import {
   createSnapshotInterpolator,
@@ -20,6 +21,8 @@ export interface MountWorldSceneOptions {
   onDisconnected?: () => void;
   /** Called every frame with the local player's live stats for HUD rendering. */
   onStats?: (s: LocalPlayerStats) => void;
+  /** Called when the server confirms a loot pickup (so the bag can refresh). */
+  onPickup?: (baseId: string) => void;
 }
 
 export interface LocalPlayerStats {
@@ -60,10 +63,11 @@ export async function mountWorldScene(
   window.addEventListener('resize', onResize);
 
   const terrainLayer = new Container();
+  const groundLayer = new Container();
   const entityLayer = new Container();
   entityLayer.sortableChildren = true;
   const floaterLayer = new Container();
-  world.addChild(terrainLayer, entityLayer, floaterLayer);
+  world.addChild(terrainLayer, groundLayer, entityLayer, floaterLayer);
 
   function drawTerrain(zoneSize: Vec2, tileMap: number[][]): void {
     terrainLayer.removeChildren();
@@ -100,6 +104,31 @@ export async function mountWorldScene(
   }
   const playerSprites = new Map<string, PlayerSpriteEntry>();
   const mobSprites = new Map<string, MobSpriteEntry>();
+
+  // ─── Ground items (S13) ────────────────────────────────────────
+  const groundSprites = new Map<string, Container>();
+  let latestGroundItems: GroundItem[] = [];
+  /** Items we've already sent a pickup for, so walk-over doesn't spam. */
+  const requestedPickups = new Set<string>();
+  const PICKUP_TILE_RADIUS = 1.2;
+
+  function makeGroundSprite(baseId: string): Container {
+    const c = new Container();
+    c.eventMode = 'static';
+    c.cursor = 'pointer';
+    const gem = new Graphics()
+      .poly([0, -7, 6, 0, 0, 7, -6, 0])
+      .fill({ color: 0xffe08a })
+      .stroke({ color: 0x6b4a12, width: 1.5 });
+    const label = new Text({
+      text: getItemBase(baseId)?.name ?? baseId,
+      style: { fontSize: 9, fill: 0xffe08a, stroke: { color: 0x000000, width: 3 } },
+    });
+    label.anchor.set(0.5, 1);
+    label.y = -10;
+    c.addChild(gem, label);
+    return c;
+  }
   // mobId → { x, y } in tile coords, kept fresh from latest render frame
   // so damage floaters can spawn at the mob's last seen position even
   // after a fatal hit collapses the entry on the next snapshot.
@@ -212,6 +241,11 @@ export async function mountWorldScene(
         break;
       case 'snapshot':
         interp.ingest(msg.snapshot);
+        latestGroundItems = msg.snapshot.groundItems ?? [];
+        break;
+      case 'picked-up':
+        requestedPickups.delete(msg.itemId);
+        opts.onPickup?.(msg.baseId);
         break;
       case 'damage': {
         const pos = lastMobPos.get(msg.event.targetId);
@@ -259,6 +293,22 @@ export async function mountWorldScene(
       clicked.y > zoneSize.y - 1
     ) {
       return;
+    }
+    // Loot takes click priority: if a ground item is near the click, grab it.
+    {
+      let bestItem: GroundItem | null = null;
+      let bestItemDist = 1.5;
+      for (const gi of latestGroundItems) {
+        const d = Math.hypot(gi.pos.x - clicked.x, gi.pos.y - clicked.y);
+        if (d < bestItemDist) {
+          bestItemDist = d;
+          bestItem = gi;
+        }
+      }
+      if (bestItem) {
+        client.send({ type: 'pickup', itemId: bestItem.id });
+        return;
+      }
     }
     // Pick the closest alive mob within a generous tile radius. The mob's
     // sprite body sits ~22px above its tile centre, so clicking on the
@@ -398,6 +448,39 @@ export async function mountWorldScene(
     }
 
     entityLayer.sortChildren();
+
+    // Ground items — sync sprites + walk-over auto-pickup.
+    const seenG = new Set<string>();
+    const me = myId != null ? frame.players.find((p) => p.id === myId) : undefined;
+    for (const gi of latestGroundItems) {
+      seenG.add(gi.id);
+      let sprite = groundSprites.get(gi.id);
+      if (!sprite) {
+        sprite = makeGroundSprite(gi.baseId);
+        sprite.on('pointerdown', (e) => {
+          e.stopPropagation();
+          client.send({ type: 'pickup', itemId: gi.id });
+        });
+        groundSprites.set(gi.id, sprite);
+        groundLayer.addChild(sprite);
+      }
+      const s = tileToScreen(gi.pos);
+      sprite.x = s.x;
+      sprite.y = s.y;
+      // Walk-over pickup: send once when the local player steps close.
+      if (me && !requestedPickups.has(gi.id)) {
+        if (Math.hypot(gi.pos.x - me.pos.x, gi.pos.y - me.pos.y) <= PICKUP_TILE_RADIUS) {
+          requestedPickups.add(gi.id);
+          client.send({ type: 'pickup', itemId: gi.id });
+        }
+      }
+    }
+    for (const [id, sprite] of groundSprites) {
+      if (!seenG.has(id)) {
+        groundLayer.removeChild(sprite);
+        groundSprites.delete(id);
+      }
+    }
 
     // Floaters
     for (let i = floaters.length - 1; i >= 0; i--) {

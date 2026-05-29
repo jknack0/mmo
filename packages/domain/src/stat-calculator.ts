@@ -9,9 +9,13 @@
 //   critChance is an additive fraction starting at 0.
 
 import { PASSIVE_NODES, type PassiveAllocation, type PassiveMod } from './passives.js';
+import { emptyItemStats, type AggregatedItemStats } from './items.js';
 
 /** Default Burn stack cap before Searing Touch / Inferno modify it. */
 export const DEFAULT_BURN_STACK_CAP = 5;
+
+/** Fire damage gained per point of equipped INT (Pyromancy is INT-scaling). */
+export const INT_FIRE_DMG_PER_POINT = 0.01;
 
 export interface DerivedStats {
   fireDamageMult: number;
@@ -35,6 +39,13 @@ export interface DerivedStats {
   pyromancersWard: boolean;
   /** Runtime-mechanic node keys (procs/buffs/CC) consumed by combat systems. */
   flags: string[];
+  // ─── Equipped-gear contributions (S13 #15) ───
+  /** The four core attributes, summed from equipped items (+ tree/level later). */
+  attributes: { str: number; dex: number; int: number; vit: number };
+  /** Summed armor mitigation. Character-sheet only until players take damage (S18). */
+  armor: number;
+  /** Flat bonus added to weapon (basic-attack) damage. */
+  weaponDamageBonus: number;
 }
 
 export interface StatContext {
@@ -42,6 +53,8 @@ export interface StatContext {
   equippedPyroSkillCount?: number;
   /** Override the base Burn cap (defaults to DEFAULT_BURN_STACK_CAP). */
   baseBurnStackCap?: number;
+  /** Aggregated flat stats of currently-equipped items (S13). */
+  itemStats?: AggregatedItemStats;
 }
 
 export function baseDerivedStats(cap: number = DEFAULT_BURN_STACK_CAP): DerivedStats {
@@ -60,6 +73,9 @@ export function baseDerivedStats(cap: number = DEFAULT_BURN_STACK_CAP): DerivedS
     inferno: false,
     pyromancersWard: false,
     flags: [],
+    attributes: { str: 0, dex: 0, int: 0, vit: 0 },
+    armor: 0,
+    weaponDamageBonus: 0,
   };
 }
 
@@ -141,8 +157,18 @@ export function computeDerivedStats(
   const resolved: Required<StatContext> = {
     equippedPyroSkillCount: ctx.equippedPyroSkillCount ?? 6,
     baseBurnStackCap: ctx.baseBurnStackCap ?? DEFAULT_BURN_STACK_CAP,
+    itemStats: ctx.itemStats ?? emptyItemStats(),
   };
   const s = baseDerivedStats(resolved.baseBurnStackCap);
+
+  // Equipped gear (S13): surface attributes + armor + weapon damage, and map
+  // INT into fire damage (Pyromancy scales off INT). Applied before passives
+  // fold so all fireDamageMult contributions accumulate additively.
+  const items = resolved.itemStats;
+  s.attributes = { str: items.str, dex: items.dex, int: items.int, vit: items.vit };
+  s.armor = items.armor;
+  s.weaponDamageBonus = items.weaponDamage;
+  s.fireDamageMult += items.int * INT_FIRE_DMG_PER_POINT;
 
   let infernoTaken = false;
   for (const [id, ranks] of Object.entries(alloc)) {

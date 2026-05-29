@@ -10,3 +10,6 @@
 // S10 (#12): Pyromancy passive tree + StatCalculator.
 export * from './passives.js';
 export * from './stat-calculator.js';
+// S13 (#15): items + drops.
+export * from './items.js';
+export * from './drop-table.js';

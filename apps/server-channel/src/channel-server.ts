@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import type Redis from 'ioredis';
 import type { AddressInfo } from 'node:net';
+import type { Kysely } from 'kysely';
 import {
   decodeClientMessage,
   encodeServerMessage,
@@ -10,6 +11,7 @@ import {
   type Vec2,
   type PlayerId,
 } from '@mmo/protocol';
+import { rollDrop, aggregateItemStats } from '@mmo/domain';
 import {
   createZoneState,
   spawnPlayer,
@@ -21,6 +23,8 @@ import {
   performDodge,
   snapshotZone,
   spawnMob,
+  addGroundItem,
+  removeGroundItem,
   type ZoneState,
   type MobSpawnInput,
 } from './zone/zone-state.js';
@@ -28,17 +32,33 @@ import { engageTarget, advancePlayerCombat } from './combat/combat-system.js';
 import { stepResources } from './resources/resource-system.js';
 import { loadTripods } from './persistence/tripod-store.js';
 import { loadPassives } from './persistence/passive-store.js';
+import { createChannelItemRepo, type ChannelItemRepo } from './persistence/item-repo.js';
+import type { ChannelDatabase } from './db/types.js';
 
 interface Connection {
   ws: WebSocket;
   playerId: PlayerId | null; // null until Hello validates
+  characterId: string | null;
 }
 
 export interface ChannelServerOptions {
   redis: Redis;
+  /** Optional Postgres handle. When present, mob drops + pickups persist
+   *  (ADR-0013 write-through) and equipped gear loads on Hello. Tests that
+   *  don't exercise items omit it. */
+  db?: Kysely<ChannelDatabase>;
   zone: { size: Vec2; tileMap: number[][] };
   mobs?: MobSpawnInput[];
   tickHz?: number;
+}
+
+/** Tiles a player must be within to grab a ground item. */
+const PICKUP_RADIUS = 1.5;
+
+function dist(a: Vec2, b: Vec2): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
 export interface ChannelServer {
@@ -67,6 +87,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
     spawnMob(zone, mob);
   }
 
+  const itemRepo: ChannelItemRepo | null = opts.db ? createChannelItemRepo(opts.db) : null;
   const connections = new Map<WebSocket, Connection>();
 
   let wss: WebSocketServer | null = null;
@@ -109,12 +130,15 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       }
       const playerId = randomUUID();
       conn.playerId = playerId;
-      // Load saved tripod + passive loadouts for this character so S09/S10
-      // selections take effect from the first cast. equippedPyroSkillCount
-      // defaults to the full 6-of-6 Pyro hotbar at alpha (drives Annihilator).
-      const [tripods, passives] = await Promise.all([
+      conn.characterId = msg.characterId;
+      // Load saved tripod + passive loadouts (Redis) and equipped gear
+      // (Postgres) so S09/S10/S13 selections take effect from the first cast.
+      // equippedPyroSkillCount defaults to the full 6-of-6 Pyro hotbar at
+      // alpha (drives Annihilator).
+      const [tripods, passives, equippedBaseIds] = await Promise.all([
         loadTripods(opts.redis, msg.characterId),
         loadPassives(opts.redis, msg.characterId),
+        itemRepo ? itemRepo.equippedBaseIds(msg.characterId) : Promise.resolve([]),
       ]);
       spawnPlayer(zone, {
         id: playerId,
@@ -122,6 +146,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         name: msg.name,
         tripods,
         passives,
+        itemStats: aggregateItemStats(equippedBaseIds),
       });
       send(ws, {
         type: 'welcome',
@@ -154,9 +179,54 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         performDodge(zone, conn.playerId, Date.now());
         return;
       }
+      case 'pickup': {
+        await handlePickup(ws, conn, msg.itemId);
+        return;
+      }
       case 'hello':
         return;
     }
+  }
+
+  /**
+   * Proximity-gated pickup. The ground item is claimed synchronously (removed
+   * from the zone) so two near-simultaneous requests can't both win, then the
+   * write-through to Postgres runs; on failure the item is restored.
+   */
+  async function handlePickup(ws: WebSocket, conn: Connection, itemId: string): Promise<void> {
+    if (!itemRepo || !conn.playerId || !conn.characterId) return;
+    const player = zone.players.get(conn.playerId);
+    const item = zone.groundItems.get(itemId);
+    if (!player || !item) return;
+    if (dist(player.pos, item.pos) > PICKUP_RADIUS) {
+      send(ws, { type: 'error', reason: 'too-far' });
+      return;
+    }
+    removeGroundItem(zone, itemId); // claim before the await
+    try {
+      await itemRepo.pickUp(conn.characterId, itemId);
+      send(ws, { type: 'picked-up', itemId, baseId: item.baseId });
+    } catch (err) {
+      console.error('[channel] pickup failed, restoring item:', err);
+      addGroundItem(zone, item);
+    }
+  }
+
+  /**
+   * Roll the drop table for a freshly-killed mob and, on a hit, mint a
+   * server-issued item (write-through) before placing it on the ground.
+   */
+  function maybeDropLoot(mobId: string): void {
+    if (!itemRepo) return;
+    const mob = zone.mobs.get(mobId);
+    if (!mob) return;
+    const baseId = rollDrop(mob.kind, Math.random());
+    if (!baseId) return;
+    const pos = { ...mob.pos };
+    itemRepo
+      .createDroppedItem(baseId)
+      .then((id) => addGroundItem(zone, { id, baseId, pos }))
+      .catch((err) => console.error('[channel] drop mint failed:', err));
   }
 
   function tick(): void {
@@ -172,11 +242,13 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       const events = advancePlayerCombat(zone, player.id, now);
       for (const ev of events) {
         broadcast({ type: 'damage', event: ev });
+        if (ev.fatal) maybeDropLoot(ev.targetId);
       }
     }
     // Burn DoT — ticks once per second per active stack-set.
     for (const ev of stepBurns(zone, now)) {
       broadcast({ type: 'damage', event: ev });
+      if (ev.fatal) maybeDropLoot(ev.targetId);
     }
     stepMovement(zone, dtSec);
     stepMobs(zone, now);
@@ -195,7 +267,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         });
         wss.on('error', reject);
         wss.on('connection', (ws) => {
-          const conn: Connection = { ws, playerId: null };
+          const conn: Connection = { ws, playerId: null, characterId: null };
           connections.set(ws, conn);
 
           ws.on('message', (data) => {

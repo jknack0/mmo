@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { createZoneState, spawnPlayer, spawnMob } from '../zone/zone-state.js';
 import { attemptAttack, SKILL_DEFS } from './combat-system.js';
-import type { PassiveAllocation } from '@mmo/domain';
+import { aggregateItemStats, INT_FIRE_DMG_PER_POINT, type PassiveAllocation } from '@mmo/domain';
 
 const OPEN_MAP = Array.from({ length: 10 }, () => Array.from({ length: 10 }, () => 0));
 const alloc = (...ids: string[]): PassiveAllocation =>
@@ -131,6 +131,37 @@ describe('Lingering Heat burn duration', () => {
     attemptAttack(z, 'p1', 'm', 'cinder-spray', 1000);
     // base 6000ms * 1.20 = 7200
     expect(z.mobs.get('m')!.burnExpiresAt).toBe(1000 + Math.round(6000 * 1.2));
+  });
+});
+
+describe('equipped items (S13) change combat', () => {
+  function zoneWithItems(baseIds: string[]) {
+    const zone = createZoneState({ size: { x: 10, y: 10 }, tileMap: OPEN_MAP });
+    spawnPlayer(zone, {
+      id: 'p1',
+      characterId: 'c1',
+      name: 'Geared',
+      pos: { x: 5, y: 5 },
+      itemStats: aggregateItemStats(baseIds),
+    });
+    spawnMob(zone, { id: 'm', kind: 'skeleton', pos: { x: 5, y: 6 }, maxHp: 1000, respawnMs: 5000 });
+    return zone;
+  }
+
+  it('weaponDamage raises basic-attack damage', () => {
+    const z = zoneWithItems(['rusty-sword']); // weaponDamage 5
+    const r = attemptAttack(z, 'p1', 'm', 'basic-attack', 1000);
+    expect(r.ok && r.damage).toBe(SKILL_DEFS['basic-attack']!.damage + 5); // 12 + 5
+  });
+
+  it('equipped INT raises fire-skill damage but not the weapon attack', () => {
+    const z = zoneWithItems(['apprentice-wand']); // int 4, weaponDamage 3
+    const spark = attemptAttack(z, 'p1', 'm', 'spark', 1000);
+    expect(spark.ok && spark.damage).toBe(Math.round(10 * (1 + 4 * INT_FIRE_DMG_PER_POINT))); // ~10
+    // basic-attack gets weaponDamage (3) but NOT the INT fire bonus
+    const z2 = zoneWithItems(['apprentice-wand']);
+    const basic = attemptAttack(z2, 'p1', 'm', 'basic-attack', 1000);
+    expect(basic.ok && basic.damage).toBe(12 + 3);
   });
 });
 

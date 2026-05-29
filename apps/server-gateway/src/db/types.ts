@@ -17,7 +17,32 @@ export interface CharactersTable {
   snapshot_state: JSONColumnType<Record<string, unknown>> | null;
 }
 
+export interface ItemsTable {
+  id: Generated<string>;
+  owner_character_id: string | null;
+  base_id: string;
+  affixes: JSONColumnType<unknown[]>;
+  refinement: Generated<number>;
+  pity_counter: Generated<number>;
+  created_at: Generated<Date>;
+}
+
+export interface InventoryTable {
+  character_id: string;
+  slot: number;
+  item_id: string;
+}
+
+export interface EquippedTable {
+  character_id: string;
+  gear_slot: string;
+  item_id: string;
+}
+
 export interface Database {
   accounts: AccountsTable;
   characters: CharactersTable;
+  items: ItemsTable;
+  inventory: InventoryTable;
+  equipped: EquippedTable;
 }

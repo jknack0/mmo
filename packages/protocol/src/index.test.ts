@@ -97,6 +97,7 @@ describe('Protocol round-trip (JSON dev mode)', () => {
               alive: true,
             },
           ],
+          groundItems: [],
         },
       };
       expect(decodeServerMessage(encodeServerMessage(msg))).toEqual(msg);

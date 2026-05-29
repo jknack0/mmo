@@ -217,7 +217,10 @@ function applySkillDamage(
     bonus = detonateBurns(zone, targetId, perStack);
   }
 
-  const total = Math.round(def.damage * dmgMult) + bonus;
+  // Weapon (non-fire) attacks gain flat weapon damage from equipped gear (S13).
+  let dmg = def.damage * dmgMult;
+  if (!def.fire) dmg += stats.weaponDamageBonus;
+  const total = Math.round(dmg) + bonus;
   const { fatal, applied } = damageMob(zone, targetId, total, nowMs);
 
   // Flashburn (keystone) trades all Burn application for raw Pyro damage.

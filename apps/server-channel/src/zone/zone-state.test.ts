@@ -9,6 +9,9 @@ import {
   spawnMob,
   damageMob,
   stepMobs,
+  addGroundItem,
+  removeGroundItem,
+  nearestGroundItem,
 } from './zone-state.js';
 
 // 5×5 grid where x=2 is a blocked column. Used by collision tests.
@@ -196,6 +199,36 @@ describe('snapshotZone', () => {
     const skel2 = snap.mobs.find((m) => m.id === 'skel-2');
     expect(skel2?.alive).toBe(false);
     expect(skel2?.hp).toBe(0);
+  });
+});
+
+describe('Ground items (S13)', () => {
+  it('adds and snapshots a ground item', () => {
+    const zone = tinyZone();
+    addGroundItem(zone, { id: 'item-1', baseId: 'copper-ring', pos: { x: 2, y: 3 } });
+    const snap = snapshotZone(zone);
+    expect(snap.groundItems).toEqual([
+      { id: 'item-1', baseId: 'copper-ring', pos: { x: 2, y: 3 } },
+    ]);
+  });
+
+  it('removes a ground item and returns it', () => {
+    const zone = tinyZone();
+    addGroundItem(zone, { id: 'item-1', baseId: 'rusty-sword', pos: { x: 1, y: 1 } });
+    const removed = removeGroundItem(zone, 'item-1');
+    expect(removed?.baseId).toBe('rusty-sword');
+    expect(zone.groundItems.size).toBe(0);
+    expect(removeGroundItem(zone, 'item-1')).toBeUndefined();
+  });
+
+  it('finds the nearest ground item within radius only', () => {
+    const zone = tinyZone();
+    addGroundItem(zone, { id: 'near', baseId: 'copper-ring', pos: { x: 1, y: 1 } });
+    addGroundItem(zone, { id: 'far', baseId: 'rusty-sword', pos: { x: 4, y: 4 } });
+    const found = nearestGroundItem(zone, { x: 1, y: 1.4 }, 1.5);
+    expect(found?.id).toBe('near');
+    // nothing within radius
+    expect(nearestGroundItem(zone, { x: 0, y: 0 }, 0.5)).toBeUndefined();
   });
 });
 

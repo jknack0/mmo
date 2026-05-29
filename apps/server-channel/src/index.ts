@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import { buildChannelServer } from './channel-server.js';
+import { createChannelDb } from './db/client.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +16,7 @@ const __dirname = path.dirname(__filename);
 loadDotenv({ path: path.resolve(__dirname, '../../../.env') });
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0';
+const DATABASE_URL = process.env.DATABASE_URL;
 const CHANNEL_PORT = Number.parseInt(process.env.CHANNEL_PORT ?? '8081', 10);
 const ZONE_SIZE = { x: 30, y: 30 };
 
@@ -36,8 +38,13 @@ function buildTestTileMap(size: { x: number; y: number }): number[][] {
 
 async function main(): Promise<void> {
   const redis = new Redis(REDIS_URL);
+  // Postgres handle enables write-through drops/pickups + equipped-gear load
+  // (S13, ADR-0013). Without DATABASE_URL the channel still runs, sans items.
+  const db = DATABASE_URL ? createChannelDb(DATABASE_URL) : undefined;
+  if (!db) console.warn('[channel] DATABASE_URL unset — item drops/pickups disabled.');
   const server = buildChannelServer({
     redis,
+    db,
     zone: { size: ZONE_SIZE, tileMap: buildTestTileMap(ZONE_SIZE) },
     mobs: [
       { id: 'skel-1', kind: 'skeleton', pos: { x: 15, y: 8 }, maxHp: 60 },
