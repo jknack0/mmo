@@ -105,8 +105,46 @@ export async function mountWorldScene(
   const groundLayer = new Container();
   const entityLayer = new Container();
   entityLayer.sortableChildren = true;
+  const fxLayer = new Container();
   const floaterLayer = new Container();
-  world.addChild(terrainLayer, groundLayer, entityLayer, floaterLayer);
+  world.addChild(terrainLayer, groundLayer, entityLayer, fxLayer, floaterLayer);
+
+  // ─── Fire FX (S-art) — stepped pixel fire bursts on hits ───────
+  interface Fx {
+    g: Graphics;
+    life: number;
+    max: number;
+    kind: 'hit' | 'kill';
+  }
+  const fxs: Fx[] = [];
+
+  function drawBurst(g: Graphics, t: number, kind: 'hit' | 'kill'): void {
+    g.clear();
+    const p = 1 - t; // 0→1 expansion
+    const a = Math.min(1, t * 1.4); // fade out late
+    const base = kind === 'kill' ? 16 : 9;
+    const r = base * (0.45 + p * 1.0);
+    const dia = (rad: number) => [0, -rad, rad, 0, 0, rad, -rad, 0];
+    g.poly(dia(r)).fill({ color: 0xb0301a, alpha: 0.55 * a });
+    g.poly(dia(r * 0.66)).fill({ color: 0xff9f1a, alpha: 0.85 * a });
+    g.poly(dia(r * 0.32)).fill({ color: 0xfff1c4, alpha: a });
+    // flung ember pixels
+    const spread = r * 1.1;
+    for (let i = 0; i < (kind === 'kill' ? 5 : 3); i++) {
+      const ang = (i / 5) * Math.PI * 2 + p;
+      g.rect(Math.cos(ang) * spread, Math.sin(ang) * spread * 0.6, 2, 2).fill({ color: 0xff9f1a, alpha: a });
+    }
+  }
+
+  function spawnFireBurst(atTile: Vec2, kind: 'hit' | 'kill'): void {
+    const g = new Graphics();
+    const s = tileToScreen(atTile);
+    g.x = s.x;
+    g.y = s.y - 12;
+    fxLayer.addChild(g);
+    const max = kind === 'kill' ? 0.5 : 0.3;
+    fxs.push({ g, life: max, max, kind });
+  }
 
   // Deterministic per-tile noise (no flicker between redraws).
   function tileHash(x: number, y: number): number {
@@ -339,6 +377,7 @@ export async function mountWorldScene(
       case 'damage': {
         const pos = lastMobPos.get(msg.event.targetId);
         if (pos) {
+          spawnFireBurst(pos, msg.event.fatal ? 'kill' : 'hit');
           spawnFloater(
             pos,
             msg.event.fatal ? `KILL` : `-${msg.event.amount}`,
@@ -580,6 +619,18 @@ export async function mountWorldScene(
         groundLayer.removeChild(sprite);
         groundSprites.delete(id);
       }
+    }
+
+    // Fire FX bursts
+    for (let i = fxs.length - 1; i >= 0; i--) {
+      const fx = fxs[i]!;
+      fx.life -= dt;
+      if (fx.life <= 0) {
+        fxLayer.removeChild(fx.g);
+        fxs.splice(i, 1);
+        continue;
+      }
+      drawBurst(fx.g, fx.life / fx.max, fx.kind);
     }
 
     // Floaters

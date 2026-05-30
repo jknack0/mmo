@@ -153,23 +153,20 @@ export function InventoryPanel(props: InventoryPanelProps) {
   const attr = () => view().attributes;
 
   return (
-    <div class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col">
+    <div
+      class="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex flex-col"
+      style={{ 'font-family': 'var(--font-display, monospace)' }}
+    >
       <div class="flex items-center justify-between px-6 py-4 border-b border-white/10">
         <div>
-          <h2 class="text-lg font-bold text-white">Inventory &amp; Equipment</h2>
-          <p class="text-xs text-white/45">
-            Click to equip/unequip · right-click a carried item to Tap (Refinement)
-          </p>
+          <h2 class="ts-zone-name">Inventory &amp; Equipment</h2>
+          <p class="ts-zone-sub">Click to equip/unequip · right-click to Tap (Refinement)</p>
         </div>
         <div class="flex items-center gap-4">
-          <div class="text-sm text-white/80">
-            Materials <span class="font-mono font-bold text-[#ff9f1a]">{view().materials}</span>
+          <div class="ts-zone-sub" style={{ color: '#c9a98c' }}>
+            Materials <span style={{ color: '#ff9f1a', 'font-size': '13px' }}>{view().materials}</span>
           </div>
-          <button
-            type="button"
-            onClick={props.onClose}
-            class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm"
-          >
+          <button type="button" onClick={props.onClose} class="ts-btn">
             Close
           </button>
         </div>
@@ -179,7 +176,7 @@ export function InventoryPanel(props: InventoryPanelProps) {
         <div class="flex gap-6 max-w-5xl mx-auto">
           {/* Equipment */}
           <div class="flex-1">
-            <div class="text-xs font-bold uppercase tracking-widest text-white/60 mb-2">
+            <div class="ts-zone-sub mb-2" style={{ color: '#c9a98c' }}>
               Equipped
             </div>
             <div class="grid grid-cols-2 gap-2">
@@ -191,10 +188,13 @@ export function InventoryPanel(props: InventoryPanelProps) {
                       type="button"
                       disabled={!eq() || busy()}
                       onClick={() => eq() && onUnequip(slot)}
-                      class="text-left rounded-lg px-3 py-2 border-2 min-h-[3.5rem] transition-all"
-                      classList={{
-                        'border-amber-400/70 bg-amber-400/10 cursor-pointer hover:brightness-110': !!eq(),
-                        'border-white/10 bg-white/[0.03] cursor-default': !eq(),
+                      class="text-left px-3 py-2 min-h-[3.75rem] transition-all"
+                      classList={{ 'cursor-pointer hover:brightness-110': !!eq(), 'cursor-default': !eq() }}
+                      style={{
+                        background: eq() ? 'var(--slot-fill, #13100d)' : 'rgba(255,255,255,0.02)',
+                        'box-shadow': eq()
+                          ? `0 0 0 2px #080706, 0 0 0 4px ${RARITY_COLOR[eq()!.rarity]}, 0 0 0 6px #080706`
+                          : '0 0 0 2px #080706, 0 0 0 4px #2b2420, 0 0 0 6px #080706',
                       }}
                     >
                       <div class="text-[10px] uppercase tracking-wider text-white/40">
@@ -212,7 +212,7 @@ export function InventoryPanel(props: InventoryPanelProps) {
 
           {/* Carried + character sheet */}
           <div class="flex-1">
-            <div class="text-xs font-bold uppercase tracking-widest text-white/60 mb-2">
+            <div class="ts-zone-sub mb-2" style={{ color: '#c9a98c' }}>
               Carried ({view().inventory.length})
             </div>
             <div class="grid grid-cols-2 gap-2">
@@ -231,8 +231,11 @@ export function InventoryPanel(props: InventoryPanelProps) {
                         setTapMsg(null);
                         setTapTarget(it);
                       }}
-                      class="text-left rounded-lg px-3 py-2 border-2 bg-white/[0.04] hover:brightness-110 cursor-pointer transition-all"
-                      style={{ 'border-color': `${RARITY_COLOR[it.rarity]}66` }}
+                      class="text-left px-3 py-2 hover:brightness-110 cursor-pointer transition-all"
+                      style={{
+                        background: 'var(--slot-fill, #13100d)',
+                        'box-shadow': `0 0 0 2px #080706, 0 0 0 4px ${RARITY_COLOR[it.rarity]}, 0 0 0 6px #080706`,
+                      }}
                     >
                       <ItemTooltip baseId={it.baseId} rarity={it.rarity} affixes={it.affixes} refinement={it.refinement} />
                     </button>
@@ -241,8 +244,11 @@ export function InventoryPanel(props: InventoryPanelProps) {
               </Show>
             </div>
 
-            <div class="mt-6 rounded-lg border border-white/10 bg-white/[0.03] p-4">
-              <div class="text-xs font-bold uppercase tracking-widest text-white/60 mb-3">
+            <div
+              class="mt-6 p-4"
+              style={{ background: '#140e0a', 'box-shadow': '0 0 0 2px #080706, 0 0 0 4px #2b2420, 0 0 0 6px #080706' }}
+            >
+              <div class="ts-zone-sub mb-3" style={{ color: '#c9a98c' }}>
                 Character Sheet
               </div>
               <div class="grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm">
@@ -265,35 +271,38 @@ export function InventoryPanel(props: InventoryPanelProps) {
       {/* Tap confirmation modal */}
       <Show when={tapTarget()}>
         <div class="absolute inset-0 flex items-center justify-center bg-black/60">
-          <div class="w-80 rounded-xl border border-white/15 bg-[#15151c] p-5 shadow-2xl">
-            <h3 class="text-base font-bold text-white mb-1">Tap for Refinement</h3>
-            <div class="text-sm mb-3" style={{ color: RARITY_COLOR[tapTarget()!.rarity] }}>
+          <div
+            class="w-80 p-5"
+            style={{
+              background: '#140e0a',
+              'box-shadow': '0 0 0 2px #080706, 0 0 0 4px #2b2420, 0 0 0 6px #080706',
+            }}
+          >
+            <h3 class="ts-zone-name" style={{ 'font-size': '16px' }}>Tap for Refinement</h3>
+            <div class="mb-3 mt-1" style={{ color: RARITY_COLOR[tapTarget()!.rarity], 'font-size': '14px' }}>
               {getItemBase(tapTarget()!.baseId)?.name ?? tapTarget()!.baseId}
               <Show when={tapTarget()!.refinement > 0}>
-                <span class="text-[#ff9f1a] font-bold"> +{tapTarget()!.refinement}</span>
+                <span style={{ color: '#ff9f1a' }}> +{tapTarget()!.refinement}</span>
               </Show>
             </div>
-            <p class="text-xs text-white/55 mb-1">
-              Cost: <span class="font-mono text-[#ff9f1a]">{TAP_COST}</span> materials
-              (have <span class="font-mono">{view().materials}</span>).
+            <p class="ts-zone-sub mb-1" style={{ color: '#c9a98c', 'letter-spacing': '0', 'text-transform': 'none' }}>
+              Cost <span style={{ color: '#ff9f1a' }}>{TAP_COST}</span> materials
+              (have {view().materials}).
             </p>
-            <p class="text-[11px] text-white/35 mb-4">
+            <p class="ts-zone-sub mb-4" style={{ color: '#8a7f6e', 'letter-spacing': '0', 'text-transform': 'none', 'line-height': '1.5' }}>
               Success raises Refinement (+5% stats/level). Failure burns materials — the item is
               never destroyed. A pity counter guarantees eventual success.
             </p>
-            <div class="flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setTapTarget(null)}
-                class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm"
-              >
+            <div class="flex gap-3 justify-end items-center">
+              <button type="button" onClick={() => setTapTarget(null)} class="ts-btn">
                 Cancel
               </button>
               <button
                 type="button"
                 disabled={tapping() || view().materials < TAP_COST}
                 onClick={() => onTap(tapTarget()!)}
-                class="px-4 py-1.5 rounded bg-orange-500/80 hover:bg-orange-500 text-white text-sm font-semibold disabled:opacity-40"
+                class="ts-forge"
+                classList={{ 'is-disabled': tapping() || view().materials < TAP_COST }}
               >
                 {tapping() ? 'Tapping…' : 'Tap'}
               </button>
