@@ -29,6 +29,19 @@ describe('picked-up server message', () => {
   });
 });
 
+describe('damage skillId (per-skill FX)', () => {
+  it('round-trips the skillId on a damage event', () => {
+    const decoded = decodeServerMessage(
+      encodeServerMessage({
+        type: 'damage',
+        event: { targetId: 'm1', attackerId: 'p1', amount: 30, fatal: false, skillId: 'fireball' },
+      })
+    );
+    if (decoded.type !== 'damage') throw new Error('expected damage');
+    expect(decoded.event.skillId).toBe('fireball');
+  });
+});
+
 describe('snapshot groundItems', () => {
   it('carries ground items through encode/decode', () => {
     const snap: ZoneSnapshot = {

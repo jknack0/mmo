@@ -375,6 +375,7 @@ export function advancePlayerCombat(
       attackerId: playerId,
       amount: applied,
       fatal,
+      skillId: state.skillId,
     },
   ];
 }
