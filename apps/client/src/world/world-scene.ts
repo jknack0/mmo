@@ -108,23 +108,55 @@ export async function mountWorldScene(
   const floaterLayer = new Container();
   world.addChild(terrainLayer, groundLayer, entityLayer, floaterLayer);
 
+  // Deterministic per-tile noise (no flicker between redraws).
+  function tileHash(x: number, y: number): number {
+    let h = (x * 374761393 + y * 668265263) >>> 0;
+    h = ((h ^ (h >>> 13)) * 1274126177) >>> 0;
+    return (h >>> 0) / 4294967296;
+  }
+
   function drawTerrain(zoneSize: Vec2, tileMap: number[][]): void {
     terrainLayer.removeChildren();
+    const hw = ISO_TILE_W / 2; // 32
+    const hh = ISO_TILE_H / 2; // 16
+    const diamond = [0, -hh, hw, 0, 0, hh, -hw, 0];
     for (let y = 0; y < zoneSize.y; y++) {
       for (let x = 0; x < zoneSize.x; x++) {
         const screen = tileToScreen({ x, y });
         const tile = new Graphics();
         const blocked = tileMap[y]?.[x] === 1;
-        const shade = blocked ? 0x2a1a1a : (x + y) % 2 === 0 ? 0x2e3a30 : 0x28342a;
-        tile
-          .poly([
-            0, -ISO_TILE_H / 2,
-            ISO_TILE_W / 2, 0,
-            0, ISO_TILE_H / 2,
-            -ISO_TILE_W / 2, 0,
-          ])
-          .fill(shade)
-          .stroke({ color: 0x1a1a1f, width: 1 });
+        const r = tileHash(x, y);
+
+        const base = blocked ? 0x2a1a1a : (x + y) % 2 === 0 ? 0x2e3a30 : 0x28342a;
+        const darkEdge = blocked ? 0x140d0d : 0x1a2019;
+        const litEdge = blocked ? 0x3a2622 : 0x44523c;
+
+        // Top face.
+        tile.poly(diamond).fill(base);
+        // Pixel bevel: lit upper-left edges, shadowed lower-right edges.
+        tile.moveTo(-hw, 0).lineTo(0, -hh).lineTo(hw, 0).stroke({ color: litEdge, width: 1 });
+        tile.moveTo(hw, 0).lineTo(0, hh).lineTo(-hw, 0).stroke({ color: darkEdge, width: 2 });
+
+        // Speckle texture — a few hashed pixels of darker/lighter dirt.
+        const speckN = 2 + Math.floor(r * 3);
+        for (let i = 0; i < speckN; i++) {
+          const rr = tileHash(x * 7 + i, y * 13 + i);
+          const sx = Math.round((rr - 0.5) * hw);
+          const sy = Math.round((tileHash(x + i, y * 3 - i) - 0.5) * hh);
+          if (Math.abs(sx) / hw + Math.abs(sy) / hh > 0.78) continue; // keep inside
+          tile.rect(sx, sy, 2, 2).fill(rr > 0.5 ? litEdge : darkEdge);
+        }
+
+        if (blocked) {
+          // Charred rock outcrop: a raised top highlight + a couple cracks.
+          tile.rect(-6, -6, 4, 2).fill(0x4a342e);
+          tile.rect(2, -2, 3, 2).fill(0x1a1212);
+        } else if (r < 0.08) {
+          // Ember crack glowing through the ash.
+          tile.rect(-3, 1, 5, 1).fill(0xb0301a);
+          tile.rect(0, 0, 2, 1).fill(0xff9f1a);
+        }
+
         tile.x = screen.x;
         tile.y = screen.y;
         terrainLayer.addChild(tile);
@@ -165,17 +197,34 @@ export async function mountWorldScene(
       (RARITY_COLOR[rarity as Rarity] ?? '#ffe08a').slice(1),
       16
     );
-    const gem = new Graphics()
-      .poly([0, -7, 6, 0, 0, 7, -6, 0])
-      .fill({ color })
-      .stroke({ color: 0x1a1208, width: 1.5 });
+    const beacon = new Graphics();
+    // Ground ring.
+    beacon.ellipse(0, 3, 11, 5).fill({ color, alpha: 0.14 });
+    beacon.ellipse(0, 3, 11, 5).stroke({ color, alpha: 0.55, width: 1 });
+    // Vertical light beam (wide faint + bright core).
+    beacon.rect(-4, -24, 8, 27).fill({ color, alpha: 0.1 });
+    beacon.rect(-1, -22, 2, 25).fill({ color, alpha: 0.32 });
+    // Pixel gem.
+    beacon.poly([0, -9, 5, -3, 0, 3, -5, -3]).fill({ color }).stroke({ color: 0x0a0706, width: 1 });
+    beacon.rect(-2, -6, 2, 2).fill(0xffffff); // glint
+    // Gold uniques get orbiting embers.
+    if (rarity === 'gold') {
+      beacon.rect(-9, -10, 2, 2).fill(0xfff1c4);
+      beacon.rect(8, -6, 2, 2).fill(0xff9f1a);
+      beacon.rect(-7, 0, 2, 2).fill(0xff9f1a);
+    }
     const label = new Text({
       text: getItemBase(baseId)?.name ?? baseId,
-      style: { fontSize: 9, fill: color, stroke: { color: 0x000000, width: 3 } },
+      style: {
+        fontFamily: 'Silkscreen, monospace',
+        fontSize: 8,
+        fill: color,
+        stroke: { color: 0x000000, width: 3 },
+      },
     });
     label.anchor.set(0.5, 1);
-    label.y = -10;
-    c.addChild(gem, label);
+    label.y = -26;
+    c.addChild(beacon, label);
     return c;
   }
   // mobId → { x, y } in tile coords, kept fresh from latest render frame
