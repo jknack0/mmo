@@ -1,0 +1,164 @@
+/* ============================================================================
+   The Sundered Reaches — DESIGN TOKENS  (canonical)
+   Port target: Solid.js + Tailwind v4 + PixiJS
+   Drop this in a global stylesheet, or mirror into Tailwind v4 @theme (see end).
+   All values are the EXACT values used by the live prototype.
+   ============================================================================ */
+:root {
+  /* ---- World / palette (Art Bible §3) ---------------------------------- */
+  --void:        #0d0d12;   /* canvas background; never an asset fill        */
+  --ink:         #08080b;
+
+  --fire-core:   #fff1c4;   /* fire gradient: white-hot                      */
+  --fire-mid:    #ff9f1a;   /*                ember                          */
+  --fire-coal:   #b0301a;   /*                blood-coal                     */
+  --burn:        #ff6a3a;   /* Burn DoT accent                               */
+
+  --spirit-0:    #3a64a8;   /* resource: Spirit (cool blue) dark→light       */
+  --spirit-1:    #6ab0ff;
+  --wrath-0:     #a04a1f;   /* resource: Wrath (molten orange) dark→light    */
+  --wrath-1:     #ff8a3a;
+
+  /* terrain (for reference; rendered in Pixi, not CSS) */
+  --grass-a:     #2e3a30;
+  --grass-b:     #28342a;
+  --rock:        #2a1a1a;
+
+  /* ---- Rarity (GLOBALLY CONSTANT — never tinted by zone) ---------------- */
+  --rar-white:   #e8e8e8;
+  --rar-blue:    #6a9bff;
+  --rar-yellow:  #ffe04a;
+  --rar-green:   #48d06a;
+  --rar-gold:    #ff9f1a;
+  /* default border color a slot reads from; override per-item */
+  --rarity:      var(--rar-white);
+
+  /* ---- UI accent (swappable: ember / coal / bone / arcane) ------------- */
+  --ui-accent:   #ff9f1a;
+
+  /* ---- Frame chrome — IRON (default theme) ----------------------------- */
+  --frame-edge:  #080706;   /* darkest outline ring                         */
+  --frame-1:     #2b2420;   /* mid frame band                               */
+  --frame-2:     #13100d;   /* recessed inner panel fill                    */
+  --bevel-hi:    #5a4d36;   /* solid bevel highlight (top-left)             */
+  --bevel-lo:    #000000;   /* solid bevel shadow (bottom-right)            */
+
+  /* panel surfaces */
+  --panel:       #140e0a;   /* tooltip / popover fill (flat)                */
+  --panel-grad:  linear-gradient(180deg,#181310,#0d0a08);
+  --slot-fill:   #13100d;   /* empty slot interior                          */
+
+  /* text */
+  --txt:         #d8cdbb;
+  --txt-dim:     #8a7f6e;
+  --txt-bright:  #f0deba;
+  --txt-on-accent:#1a120a;
+
+  /* ---- Type ------------------------------------------------------------- */
+  /* Pixelify Sans = display/body/numbers ; Silkscreen = tracked labels.
+     Both Google Fonts, OFL (free). See README. */
+  --font-display: "Pixelify Sans", monospace;
+  --font-body:    "Pixelify Sans", monospace;
+  --font-label:   "Silkscreen", monospace;   /* small all-caps tracked labels */
+
+  --fs-zone:   20px;  /* zone / panel title         */ --fw-zone: 700;
+  --fs-orb:    30px;  /* big resource number        */ --fw-orb: 700;
+  --fs-cd:     22px;  /* cooldown countdown         */ --fw-cd: 700;
+  --fs-tt-name:17px;  /* tooltip name               */
+  --fs-tt-desc:13px;  /* tooltip body               */
+  --fs-label:  9px;   /* Silkscreen caps labels     */ --fw-label: 400;
+  --fs-micro:  8px;   /* tiniest labels             */
+  --ls-label:  .10em; /* letter-spacing for labels  */
+
+  /* ---- Spacing scale (px; UI is built on a 2px pixel grid) ------------- */
+  --sp-1: 2px; --sp-2: 4px; --sp-3: 6px; --sp-4: 8px;
+  --sp-5: 12px; --sp-6: 16px; --sp-7: 18px; --sp-8: 24px; --sp-9: 26px;
+
+  /* ---- Radius ----------------------------------------------------------- */
+  /* The pixel aesthetic uses SQUARE corners. Radius token kept at 0 so the
+     look stays crisp; bump only for non-pixel surfaces. */
+  --radius: 0px;
+
+  /* ---- Bevel / "shadow" recipes (hard-edged, NO blur) ------------------ */
+  /* Outer frame ring used by slots/forge buttons (2px edge / 2px band / 2px edge) */
+  --bevel-frame:
+    0 0 0 2px var(--frame-edge),
+    0 0 0 4px var(--frame-1),
+    0 0 0 6px var(--frame-edge),
+    inset 2px 2px 0 var(--bevel-hi),
+    inset -2px -2px 0 rgba(0,0,0,.6);
+  /* Selected/active: accent ring replaces the middle band */
+  --bevel-frame-active:
+    0 0 0 2px var(--frame-edge),
+    0 0 0 5px var(--ui-accent),
+    0 0 0 7px var(--frame-edge),
+    inset 2px 2px 0 var(--bevel-hi),
+    inset -2px -2px 0 rgba(0,0,0,.6);
+  /* Rarity item slot: border ring is driven by --rarity */
+  --bevel-rarity:
+    0 0 0 2px var(--frame-edge),
+    0 0 0 4px var(--rarity),
+    0 0 0 6px var(--frame-edge),
+    inset 2px 2px 0 rgba(255,255,255,.10),
+    inset -2px -2px 0 rgba(0,0,0,.6);
+  /* Panel (tooltip / popover) */
+  --bevel-panel:
+    0 0 0 2px var(--frame-edge),
+    0 0 0 4px var(--frame-1),
+    0 0 0 6px var(--frame-edge),
+    inset 2px 2px 0 var(--bevel-hi);
+  /* Inset recessed bar (resource bar track, minimap inner) */
+  --bevel-inset:
+    0 0 0 2px var(--frame-edge),
+    inset 2px 2px 0 rgba(0,0,0,.7);
+
+  /* ---- Glows (used sparingly; fire/rarity beacons) --------------------- */
+  --glow-ember:  0 0 8px rgba(255,159,26,.55);
+  --glow-burn:   0 0 8px rgba(255,106,58,.6);
+  --glow-rarity: 0 0 10px var(--rarity);
+
+  /* ---- ISO grid + sprite sizing (Art Bible §1, §4) --------------------- */
+  /* Canonical logical tile. Prototype renders at 2× for desktop; keep this
+     as the source of truth for Pixi world math. screen = ((tx-ty)*32,(tx+ty)*16) */
+  --iso-tile-w: 64px;
+  --iso-tile-h: 32px;
+  /* Intended in-world sprite footprints (target display size). */
+  --spr-hero:   32px;  /* hero  ~32×48  (native cell 16×21, renderScale 2)   */
+  --spr-hero-h: 48px;
+  --spr-mob:    32px;  /* mob   ~32×40  (native cell 16×19/16×21, scale 2)   */
+  --spr-mob-h:  40px;
+  --spr-icon:   32px;  /* item / skill icon 32×32 (native 16×16, scale 2)    */
+  --spr-loot:   16px;  /* ground loot beacon 16×16                           */
+}
+
+/* ===========================================================================
+   THEME VARIANT — BRASS chrome (swap by setting [data-frame="brass"] on a root)
+   =========================================================================== */
+[data-frame="brass"] {
+  --frame-edge: #1a120a;
+  --frame-1:    #6e5328;
+  --frame-2:    #241810;
+  --bevel-hi:   #a9842f;
+  --panel:      #1a1206;
+  --panel-grad: linear-gradient(180deg,#231809,#140d06);
+}
+
+/* ===========================================================================
+   TAILWIND v4 — paste into your global stylesheet to expose tokens as utilities
+   (e.g. bg-fire-mid, text-rar-gold, font-display). Values mirror :root above.
+   ---------------------------------------------------------------------------
+   @theme {
+     --color-void: #0d0d12;
+     --color-fire-core: #fff1c4;  --color-fire-mid: #ff9f1a;  --color-fire-coal:#b0301a;
+     --color-burn: #ff6a3a;
+     --color-spirit-0:#3a64a8; --color-spirit-1:#6ab0ff;
+     --color-wrath-0:#a04a1f;  --color-wrath-1:#ff8a3a;
+     --color-rar-white:#e8e8e8; --color-rar-blue:#6a9bff; --color-rar-yellow:#ffe04a;
+     --color-rar-green:#48d06a; --color-rar-gold:#ff9f1a;
+     --color-frame-edge:#080706; --color-frame-1:#2b2420; --color-frame-2:#13100d;
+     --color-bevel-hi:#5a4d36;
+     --color-txt:#d8cdbb; --color-txt-dim:#8a7f6e; --color-txt-bright:#f0deba;
+     --font-display:"Pixelify Sans", monospace;
+     --font-label:"Silkscreen", monospace;
+   }
+   =========================================================================== */

@@ -2,7 +2,17 @@
 // input layers, drives them from a ChannelClient + SnapshotInterpolator.
 // Single public entry: `mountWorldScene(container, opts) → cleanup`.
 
-import { Application, Container, Graphics, Text } from 'pixi.js';
+import {
+  Application,
+  Assets,
+  Container,
+  Graphics,
+  Rectangle,
+  Sprite,
+  Text,
+  Texture,
+  TextureSource,
+} from 'pixi.js';
 import type { ServerMessage, Vec2, GroundItem } from '@mmo/protocol';
 import { getItemBase, RARITY_COLOR, type Rarity } from '@mmo/domain';
 import { createChannelClient, type ChannelClient } from '../network/channel-client.js';
@@ -51,6 +61,35 @@ export async function mountWorldScene(
   });
   opts.container.appendChild(app.canvas);
 
+  // Pixel-art crispness: nearest-neighbor everywhere, no smoothing.
+  TextureSource.defaultOptions.scaleMode = 'nearest';
+
+  // Load the 8-direction sprite sheets and slice them into frame textures.
+  // Frame order is always [e, se, s, sw, w, nw, n, ne] per the handoff.
+  function slice8(src: Texture, w: number, h: number): Texture[] {
+    src.source.scaleMode = 'nearest';
+    return Array.from(
+      { length: 8 },
+      (_, i) => new Texture({ source: src.source, frame: new Rectangle(i * w, 0, w, h) })
+    );
+  }
+  const [heroSheet, skelSheet] = await Promise.all([
+    Assets.load('/assets/hero_pyromancer_idle_8dir.png') as Promise<Texture>,
+    Assets.load('/assets/mob_skeleton_base.png') as Promise<Texture>,
+  ]);
+  const HERO_FRAMES = slice8(heroSheet, 16, 21);
+  const SKEL_FRAMES = slice8(skelSheet, 16, 19);
+  const SPRITE_SCALE = 2;
+  const SOUTH = 2; // default facing toward camera
+
+  /** Screen-space movement angle → 8-dir frame index [e,se,s,sw,w,nw,n,ne]. */
+  function facingFromDelta(dx: number, dy: number): number {
+    const sdx = (dx - dy) * (ISO_TILE_W / 2);
+    const sdy = (dx + dy) * (ISO_TILE_H / 2);
+    const deg = (Math.atan2(sdy, sdx) * 180) / Math.PI;
+    return ((Math.round(deg / 45) % 8) + 8) % 8;
+  }
+
   const world = new Container();
   app.stage.addChild(world);
 
@@ -94,11 +133,16 @@ export async function mountWorldScene(
   }
 
   // ─── Sprite entries ────────────────────────────────────────────
-  interface PlayerSpriteEntry { container: Container; }
+  interface PlayerSpriteEntry {
+    container: Container;
+    body: Sprite;
+    facing: number;
+    lastPos: Vec2;
+  }
   interface MobSpriteEntry {
     container: Container;
     hpBar: Graphics;
-    body: Graphics;
+    body: Sprite;
     /** Yellow target ring drawn underfoot when the local player is sticky-targeting this mob. */
     targetRing: Graphics;
   }
@@ -142,24 +186,20 @@ export async function mountWorldScene(
   function makePlayerSprite(name: string, isMe: boolean): PlayerSpriteEntry {
     const container = new Container();
     const feet = new Graphics()
-      .ellipse(0, 0, 10, 4)
+      .ellipse(0, 1, 9, 4)
       .fill({ color: 0x000000, alpha: 0.4 });
-    const body = new Graphics()
-      .circle(0, -12, 10)
-      .fill(isMe ? 0x6ab0ff : 0xff8a6a)
-      .stroke({ color: 0x000000, width: 1 });
+    const body = new Sprite(HERO_FRAMES[SOUTH]);
+    body.anchor.set(0.5, 0.95); // feet-anchored
+    body.scale.set(SPRITE_SCALE);
+    if (!isMe) body.tint = 0xc9d6ff; // tint other players cool so "me" reads warm
     const label = new Text({
       text: name,
-      style: {
-        fontSize: 11,
-        fill: 0xffffff,
-        stroke: { color: 0x000000, width: 3 },
-      },
+      style: { fontSize: 11, fill: 0xf0deba, stroke: { color: 0x000000, width: 3 } },
     });
     label.anchor.set(0.5, 1);
-    label.y = -28;
+    label.y = -46;
     container.addChild(feet, body, label);
-    return { container };
+    return { container, body, facing: SOUTH, lastPos: { x: 0, y: 0 } };
   }
 
   function makeMobSprite(kind: string): MobSpriteEntry {
@@ -169,24 +209,19 @@ export async function mountWorldScene(
     const targetRing = new Graphics();
     targetRing.visible = false;
     const feet = new Graphics()
-      .ellipse(0, 0, 12, 5)
+      .ellipse(0, 1, 10, 4)
       .fill({ color: 0x000000, alpha: 0.5 });
-    const body = new Graphics()
-      .roundRect(-8, -22, 16, 22, 3)
-      .fill(0xc8c8c8)
-      .stroke({ color: 0x000000, width: 1 });
+    const body = new Sprite(SKEL_FRAMES[SOUTH]);
+    body.anchor.set(0.5, 0.95);
+    body.scale.set(SPRITE_SCALE);
     const label = new Text({
       text: kind,
-      style: {
-        fontSize: 10,
-        fill: 0xdddddd,
-        stroke: { color: 0x000000, width: 3 },
-      },
+      style: { fontSize: 10, fill: 0xd8cdbb, stroke: { color: 0x000000, width: 3 } },
     });
     label.anchor.set(0.5, 1);
-    label.y = -30;
+    label.y = -44;
     const hpBar = new Graphics();
-    hpBar.y = -36;
+    hpBar.y = -42;
     container.addChild(targetRing, feet, body, label, hpBar);
     return { container, hpBar, body, targetRing };
   }
@@ -409,6 +444,17 @@ export async function mountWorldScene(
       entry.container.x = s.x;
       entry.container.y = s.y;
       entry.container.zIndex = p.pos.y;
+      // Face the direction of travel; hold facing when standing still.
+      const ddx = p.pos.x - entry.lastPos.x;
+      const ddy = p.pos.y - entry.lastPos.y;
+      if (Math.abs(ddx) + Math.abs(ddy) > 0.003) {
+        const idx = facingFromDelta(ddx, ddy);
+        if (idx !== entry.facing) {
+          entry.facing = idx;
+          entry.body.texture = HERO_FRAMES[idx]!;
+        }
+      }
+      entry.lastPos = { x: p.pos.x, y: p.pos.y };
     }
     for (const [id, entry] of playerSprites) {
       if (!seenP.has(id)) {
