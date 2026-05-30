@@ -125,35 +125,35 @@ export function WorldScreen(props: WorldScreenProps) {
       <div class="absolute top-3 right-3 flex gap-2">
         <button
           type="button"
-          class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
+          class="ts-btn"
           onClick={() => setShowTripods(true)}
         >
           Tripods
         </button>
         <button
           type="button"
-          class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
+          class="ts-btn"
           onClick={() => setShowPassives(true)}
         >
           Passives
         </button>
         <button
           type="button"
-          class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
+          class="ts-btn"
           onClick={() => setShowInventory(true)}
         >
           Inventory
         </button>
         <button
           type="button"
-          class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
+          class="ts-btn"
           onClick={props.onLeave}
         >
           Back
         </button>
         <button
           type="button"
-          class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur"
+          class="ts-btn"
           onClick={props.onLogout}
         >
           Sign out
