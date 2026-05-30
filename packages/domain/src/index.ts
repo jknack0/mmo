@@ -15,3 +15,5 @@ export * from './items.js';
 export * from './drop-table.js';
 // S14 (#16): affixes + rarity.
 export * from './affixes.js';
+// S15 (#17): refinement / tapping.
+export * from './refinement.js';

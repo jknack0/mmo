@@ -9,6 +9,7 @@ import {
   type Rarity,
   type RolledAffix,
 } from './affixes.js';
+import { refinementMultiplier } from './refinement.js';
 
 /** Gear slots an item can occupy. `ring` equips into one of two ring slots. */
 export type GearSlot =
@@ -177,18 +178,21 @@ export function emptyItemStats(): AggregatedItemStats {
  * passes the base ids of currently-equipped items.
  */
 export function aggregateItemStats(baseIds: string[]): AggregatedItemStats {
-  return aggregateEquipped(baseIds.map((baseId) => ({ baseId, affixes: [] })));
+  return aggregateEquipped(baseIds.map((baseId) => ({ baseId, affixes: [], refinement: 0 })));
 }
 
-/** An equipped item instance: its base + the affixes rolled onto it. */
+/** An equipped item instance: base + rolled affixes + Refinement level (S15). */
 export interface EquippedInstance {
   baseId: string;
   affixes: RolledAffix[];
+  refinement?: number;
 }
 
 /**
- * Sum base stats + stat-affix values across equipped instances (S14). Skill
- * affixes carry no `stat` and are skipped here (tooltip-only at this slice).
+ * Sum base stats + stat-affix values across equipped instances. Every numeric
+ * stat on an item is scaled by its Refinement multiplier (S15) before summing;
+ * each scaled contribution rounds to the nearest integer. Skill affixes carry
+ * no `stat` and are skipped (tooltip-only).
  */
 export function aggregateEquipped(items: EquippedInstance[]): AggregatedItemStats {
   const out = emptyItemStats();
@@ -204,17 +208,19 @@ export function aggregateEquipped(items: EquippedInstance[]): AggregatedItemStat
     }
   };
   for (const item of items) {
+    const mult = refinementMultiplier(item.refinement ?? 0);
+    const scale = (v: number) => Math.round(v * mult);
     const b = BASE_BY_ID.get(item.baseId);
     if (b) {
-      out.str += b.stats.str ?? 0;
-      out.dex += b.stats.dex ?? 0;
-      out.int += b.stats.int ?? 0;
-      out.vit += b.stats.vit ?? 0;
-      out.weaponDamage += b.stats.weaponDamage ?? 0;
-      out.armor += b.stats.armor ?? 0;
+      out.str += scale(b.stats.str ?? 0);
+      out.dex += scale(b.stats.dex ?? 0);
+      out.int += scale(b.stats.int ?? 0);
+      out.vit += scale(b.stats.vit ?? 0);
+      out.weaponDamage += scale(b.stats.weaponDamage ?? 0);
+      out.armor += scale(b.stats.armor ?? 0);
     }
     for (const aff of item.affixes ?? []) {
-      if (aff.kind === 'stat') addStat(aff.stat, aff.value);
+      if (aff.kind === 'stat') addStat(aff.stat, scale(aff.value));
     }
   }
   return out;

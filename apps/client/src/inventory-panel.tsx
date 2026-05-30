@@ -11,8 +11,11 @@ import {
   fetchInventory,
   equipItem,
   unequipItem,
+  tapItem,
   RARITY_COLOR,
+  TAP_COST,
   type InventoryView,
+  type InventoryEntry,
   type EquippedEntry,
   type Rarity,
   type RolledAffix,
@@ -48,11 +51,14 @@ function statLine(baseId: string): string {
 }
 
 /** Rarity-colored name + base stats + affix lines (D2-style tooltip body). */
-function ItemTooltip(props: { baseId: string; rarity: Rarity; affixes: RolledAffix[] }) {
+function ItemTooltip(props: { baseId: string; rarity: Rarity; affixes: RolledAffix[]; refinement?: number }) {
   return (
     <>
       <div class="text-sm font-medium" style={{ color: RARITY_COLOR[props.rarity] }}>
         {getItemBase(props.baseId)?.name ?? props.baseId}
+        <Show when={(props.refinement ?? 0) > 0}>
+          <span class="text-[#ff9f1a] font-bold"> +{props.refinement}</span>
+        </Show>
       </div>
       <div class="text-[10px] text-white/45">{statLine(props.baseId)}</div>
       <For each={props.affixes}>
@@ -76,8 +82,31 @@ export function InventoryPanel(props: InventoryPanelProps) {
     attributes: { str: 0, dex: 0, int: 0, vit: 0 },
     armor: 0,
     magicFind: 0,
+    materials: 0,
   });
   const [busy, setBusy] = createSignal(false);
+  // Tapping: the item awaiting a tap-confirmation, and the last outcome.
+  const [tapTarget, setTapTarget] = createSignal<InventoryEntry | null>(null);
+  const [tapMsg, setTapMsg] = createSignal<{ text: string; color: string } | null>(null);
+  const [tapping, setTapping] = createSignal(false);
+
+  async function onTap(entry: InventoryEntry) {
+    if (tapping()) return;
+    setTapping(true);
+    const r = await tapItem(props.token, props.characterId, entry.itemId);
+    setTapping(false);
+    setTapTarget(null);
+    if (!r.ok) {
+      setTapMsg({ text: r.error === 'insufficient-materials' ? 'Not enough materials.' : r.error, color: '#ff6a6a' });
+    } else if (r.outcome === 'success') {
+      setTapMsg({ text: `Refinement succeeded → +${r.refinement}!`, color: '#7CFC9A' });
+    } else if (r.outcome === 'capped') {
+      setTapMsg({ text: 'Already at max Refinement for this rarity.', color: '#ffd24a' });
+    } else {
+      setTapMsg({ text: 'Tap failed — materials lost, item safe.', color: '#ff9f6a' });
+    }
+    await refresh();
+  }
 
   async function refresh() {
     setView(await fetchInventory(props.token, props.characterId));
@@ -129,16 +158,21 @@ export function InventoryPanel(props: InventoryPanelProps) {
         <div>
           <h2 class="text-lg font-bold text-white">Inventory &amp; Equipment</h2>
           <p class="text-xs text-white/45">
-            Click a carried item to equip · click an equipped item to remove
+            Click to equip/unequip · right-click a carried item to Tap (Refinement)
           </p>
         </div>
-        <button
-          type="button"
-          onClick={props.onClose}
-          class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm"
-        >
-          Close
-        </button>
+        <div class="flex items-center gap-4">
+          <div class="text-sm text-white/80">
+            Materials <span class="font-mono font-bold text-[#ff9f1a]">{view().materials}</span>
+          </div>
+          <button
+            type="button"
+            onClick={props.onClose}
+            class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm"
+          >
+            Close
+          </button>
+        </div>
       </div>
 
       <div class="flex-1 overflow-y-auto px-6 py-5">
@@ -167,7 +201,7 @@ export function InventoryPanel(props: InventoryPanelProps) {
                         {SLOT_LABEL[slot]}
                       </div>
                       <Show when={eq()} fallback={<div class="text-xs text-white/25">empty</div>}>
-                        <ItemTooltip baseId={eq()!.baseId} rarity={eq()!.rarity} affixes={eq()!.affixes} />
+                        <ItemTooltip baseId={eq()!.baseId} rarity={eq()!.rarity} affixes={eq()!.affixes} refinement={eq()!.refinement} />
                       </Show>
                     </button>
                   );
@@ -192,10 +226,15 @@ export function InventoryPanel(props: InventoryPanelProps) {
                       type="button"
                       disabled={busy()}
                       onClick={() => onEquip(it.itemId, it.baseId)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setTapMsg(null);
+                        setTapTarget(it);
+                      }}
                       class="text-left rounded-lg px-3 py-2 border-2 bg-white/[0.04] hover:brightness-110 cursor-pointer transition-all"
                       style={{ 'border-color': `${RARITY_COLOR[it.rarity]}66` }}
                     >
-                      <ItemTooltip baseId={it.baseId} rarity={it.rarity} affixes={it.affixes} />
+                      <ItemTooltip baseId={it.baseId} rarity={it.rarity} affixes={it.affixes} refinement={it.refinement} />
                     </button>
                   )}
                 </For>
@@ -222,6 +261,56 @@ export function InventoryPanel(props: InventoryPanelProps) {
           </div>
         </div>
       </div>
+
+      {/* Tap confirmation modal */}
+      <Show when={tapTarget()}>
+        <div class="absolute inset-0 flex items-center justify-center bg-black/60">
+          <div class="w-80 rounded-xl border border-white/15 bg-[#15151c] p-5 shadow-2xl">
+            <h3 class="text-base font-bold text-white mb-1">Tap for Refinement</h3>
+            <div class="text-sm mb-3" style={{ color: RARITY_COLOR[tapTarget()!.rarity] }}>
+              {getItemBase(tapTarget()!.baseId)?.name ?? tapTarget()!.baseId}
+              <Show when={tapTarget()!.refinement > 0}>
+                <span class="text-[#ff9f1a] font-bold"> +{tapTarget()!.refinement}</span>
+              </Show>
+            </div>
+            <p class="text-xs text-white/55 mb-1">
+              Cost: <span class="font-mono text-[#ff9f1a]">{TAP_COST}</span> materials
+              (have <span class="font-mono">{view().materials}</span>).
+            </p>
+            <p class="text-[11px] text-white/35 mb-4">
+              Success raises Refinement (+5% stats/level). Failure burns materials — the item is
+              never destroyed. A pity counter guarantees eventual success.
+            </p>
+            <div class="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setTapTarget(null)}
+                class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={tapping() || view().materials < TAP_COST}
+                onClick={() => onTap(tapTarget()!)}
+                class="px-4 py-1.5 rounded bg-orange-500/80 hover:bg-orange-500 text-white text-sm font-semibold disabled:opacity-40"
+              >
+                {tapping() ? 'Tapping…' : 'Tap'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      {/* Outcome popup */}
+      <Show when={tapMsg()}>
+        <div class="absolute top-20 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg bg-black/85 border border-white/15 text-sm font-semibold animate-pulse"
+          style={{ color: tapMsg()!.color }}
+          onClick={() => setTapMsg(null)}
+        >
+          {tapMsg()!.text}
+        </div>
+      </Show>
     </div>
   );
 }
