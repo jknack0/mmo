@@ -13,6 +13,7 @@ import { createCharacterRepo } from './character/character-repo.js';
 import { createCharacterService } from './character/character-service.js';
 import { createInventoryRepo } from './inventory/inventory-repo.js';
 import { createTappingService } from './tapping/tapping-service.js';
+import { createVendorService } from './vendor/vendor-service.js';
 import { buildGatewayServer } from './http/server.js';
 
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
@@ -42,6 +43,7 @@ async function main(): Promise<void> {
 
   const inventory = createInventoryRepo(db);
   const tapping = createTappingService(db);
+  const vendor = createVendorService(db);
 
   const server = buildGatewayServer({
     auth,
@@ -49,6 +51,7 @@ async function main(): Promise<void> {
     redis,
     inventory,
     tapping,
+    vendor,
     clientOrigin: CLIENT_ORIGIN,
     channelWsUrl: CHANNEL_WS_URL,
   });

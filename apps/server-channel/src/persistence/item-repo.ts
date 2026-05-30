@@ -9,7 +9,7 @@
 
 import type { Kysely } from 'kysely';
 import type { ChannelDatabase } from '../db/types.js';
-import type { RolledAffix } from '@mmo/domain';
+import { getConsumable, type RolledAffix } from '@mmo/domain';
 
 export interface ChannelEquippedInstance {
   baseId: string;
@@ -24,6 +24,17 @@ export interface ChannelItemRepo {
   pickUp(characterId: string, itemId: string): Promise<number>;
   /** Equipped items (base + affixes) for StatCalculator on Hello. */
   equippedInstances(characterId: string): Promise<ChannelEquippedInstance[]>;
+  /**
+   * Use a consumable from inventory (S16): if the carried item is a known
+   * consumable, delete it and append an immutable `consume` audit row, all in
+   * one transaction. Returns the heal amount, or null when the item isn't
+   * carried by this character or isn't consumable.
+   */
+  consume(
+    characterId: string,
+    accountId: string | null,
+    itemId: string
+  ): Promise<{ baseId: string; heal: number } | null>;
 }
 
 function firstFreeSlot(used: number[]): number {
@@ -73,6 +84,34 @@ export function createChannelItemRepo(db: Kysely<ChannelDatabase>): ChannelItemR
         .where('equipped.character_id', '=', characterId)
         .execute();
       return rows.map((r) => ({ baseId: r.baseId, affixes: (r.affixes ?? []) as RolledAffix[], refinement: r.refinement }));
+    },
+
+    async consume(characterId, accountId, itemId) {
+      return db.transaction().execute(async (trx) => {
+        const row = await trx
+          .selectFrom('inventory')
+          .innerJoin('items', 'items.id', 'inventory.item_id')
+          .select('items.base_id as baseId')
+          .where('inventory.character_id', '=', characterId)
+          .where('inventory.item_id', '=', itemId)
+          .executeTakeFirst();
+        if (!row) return null;
+        const consumable = getConsumable(row.baseId);
+        if (!consumable) return null;
+
+        // Deleting the item cascades to its inventory row (FK on delete cascade).
+        await trx.deleteFrom('items').where('id', '=', itemId).execute();
+        await trx
+          .insertInto('audit_log')
+          .values({
+            account_id: accountId,
+            character_id: characterId,
+            action: 'consume',
+            detail: JSON.stringify({ baseId: row.baseId, heal: consumable.heal }),
+          })
+          .execute();
+        return { baseId: row.baseId, heal: consumable.heal };
+      });
     },
   };
 }

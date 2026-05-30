@@ -17,6 +17,18 @@ export interface CharactersTable {
   snapshot_state: JSONColumnType<Record<string, unknown>> | null;
   /** Refinement materials balance (S15). */
   materials: Generated<number>;
+  /** Gold currency balance (S16). */
+  gold: Generated<number>;
+}
+
+/** Append-only audit trail (S16, ADR-0013). Rows are never updated or deleted. */
+export interface AuditLogTable {
+  id: Generated<string>;
+  account_id: string | null;
+  character_id: string | null;
+  action: string;
+  detail: JSONColumnType<Record<string, unknown>>;
+  created_at: Generated<Date>;
 }
 
 export interface ItemsTable {
@@ -47,4 +59,5 @@ export interface Database {
   items: ItemsTable;
   inventory: InventoryTable;
   equipped: EquippedTable;
+  audit_log: AuditLogTable;
 }

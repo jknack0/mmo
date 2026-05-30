@@ -27,6 +27,9 @@ export interface PlayerState {
   /** ADR-0010: combat-built ultimate resource. */
   wrath: number;
   maxWrath: number;
+  /** Current health (S16 pulls player HP forward). */
+  hp: number;
+  maxHp: number;
 }
 
 export interface MobState {
@@ -64,7 +67,8 @@ export type ClientMessage =
   | { type: 'move'; target: Vec2 }
   | { type: 'attack'; targetId: EntityId; skillId: SkillId }
   | { type: 'dodge' }
-  | { type: 'pickup'; itemId: EntityId };
+  | { type: 'pickup'; itemId: EntityId }
+  | { type: 'use-item'; itemId: EntityId };
 
 // ─── Channel → Client ───────────────────────────────────────────
 
@@ -85,6 +89,7 @@ export type ServerMessage =
   | { type: 'snapshot'; snapshot: ZoneSnapshot }
   | { type: 'damage'; event: DamageEvent }
   | { type: 'picked-up'; itemId: EntityId; baseId: string }
+  | { type: 'consumed'; itemId: EntityId; heal: number }
   | { type: 'error'; reason: string };
 
 // ─── Gateway HTTP shapes ────────────────────────────────────────
@@ -143,6 +148,11 @@ export function decodeClientMessage(raw: string): ClientMessage {
         throw new Error('protocol: malformed pickup');
       }
       return { type: 'pickup', itemId: parsed.itemId };
+    case 'use-item':
+      if (typeof parsed.itemId !== 'string') {
+        throw new Error('protocol: malformed use-item');
+      }
+      return { type: 'use-item', itemId: parsed.itemId };
     default:
       throw new Error(`protocol: unknown client message type "${parsed.type}"`);
   }
@@ -197,6 +207,11 @@ export function decodeServerMessage(raw: string): ServerMessage {
         throw new Error('protocol: malformed picked-up');
       }
       return { type: 'picked-up', itemId: parsed.itemId, baseId: parsed.baseId };
+    case 'consumed':
+      if (typeof parsed.itemId !== 'string' || typeof parsed.heal !== 'number') {
+        throw new Error('protocol: malformed consumed');
+      }
+      return { type: 'consumed', itemId: parsed.itemId, heal: parsed.heal };
     case 'error':
       if (typeof parsed.reason !== 'string') {
         throw new Error('protocol: malformed error');

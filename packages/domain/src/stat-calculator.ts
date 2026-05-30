@@ -17,6 +17,11 @@ export const DEFAULT_BURN_STACK_CAP = 5;
 /** Fire damage gained per point of equipped INT (Pyromancy is INT-scaling). */
 export const INT_FIRE_DMG_PER_POINT = 0.01;
 
+/** Player base HP before any VIT contribution (S16 pulls HP forward). */
+export const BASE_HP = 100;
+/** HP gained per point of (equipped) VIT. */
+export const HP_PER_VIT = 10;
+
 export interface DerivedStats {
   fireDamageMult: number;
   burnDamageMult: number;
@@ -44,6 +49,8 @@ export interface DerivedStats {
   attributes: { str: number; dex: number; int: number; vit: number };
   /** Summed armor mitigation. Character-sheet only until players take damage (S18). */
   armor: number;
+  /** Max HP, derived from base + equipped VIT (S16). */
+  maxHp: number;
   /** Flat bonus added to weapon (basic-attack) damage. */
   weaponDamageBonus: number;
   /** Character-level Magic Find % (ADR-0005 — never a gear affix). */
@@ -79,6 +86,7 @@ export function baseDerivedStats(cap: number = DEFAULT_BURN_STACK_CAP): DerivedS
     flags: [],
     attributes: { str: 0, dex: 0, int: 0, vit: 0 },
     armor: 0,
+    maxHp: BASE_HP,
     weaponDamageBonus: 0,
     magicFind: 0,
   };
@@ -174,6 +182,7 @@ export function computeDerivedStats(
   const items = resolved.itemStats;
   s.attributes = { str: items.str, dex: items.dex, int: items.int, vit: items.vit };
   s.armor = items.armor;
+  s.maxHp = BASE_HP + items.vit * HP_PER_VIT;
   s.weaponDamageBonus = items.weaponDamage;
   s.fireDamageMult += items.int * INT_FIRE_DMG_PER_POINT + items.firePct / 100;
   s.magicFind = resolved.magicFind;

@@ -15,6 +15,7 @@ import { createCharacterRepo } from '../character/character-repo.js';
 import { createCharacterService } from '../character/character-service.js';
 import { createInventoryRepo, type InventoryRepo } from '../inventory/inventory-repo.js';
 import { createTappingService } from '../tapping/tapping-service.js';
+import { createVendorService } from '../vendor/vendor-service.js';
 import { buildGatewayServer } from './server.js';
 
 const stubDiscord: DiscordClient = {
@@ -49,6 +50,7 @@ describe('inventory + equip HTTP', () => {
       redis,
       inventory,
       tapping: createTappingService(db),
+      vendor: createVendorService(db),
       clientOrigin: 'http://localhost:5173',
       channelWsUrl: 'ws://channel.test:8081',
     });
