@@ -73,6 +73,8 @@ export interface DamageEvent {
   attackerId: PlayerId;
   amount: number;
   fatal: boolean;
+  /** Skill that dealt this damage, for per-skill client VFX. 'burn' = DoT tick. */
+  skillId?: SkillId;
 }
 
 // Optional: PlayerState.engagedTargetId may be omitted by older snapshots

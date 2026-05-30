@@ -8,6 +8,7 @@ import type {
   PlayerState,
   MobState,
   GroundItem,
+  DamageEvent,
 } from '@mmo/protocol';
 
 export type PlayerAttackState =
@@ -315,8 +316,8 @@ export function applyBurnStacks(
 export function stepBurns(
   zone: ZoneState,
   nowMs: number
-): { targetId: EntityId; attackerId: PlayerId; amount: number; fatal: boolean }[] {
-  const events: { targetId: EntityId; attackerId: PlayerId; amount: number; fatal: boolean }[] = [];
+): DamageEvent[] {
+  const events: DamageEvent[] = [];
   for (const mob of zone.mobs.values()) {
     if (!mob.alive || mob.burnStacks === 0) continue;
     if (nowMs >= mob.burnExpiresAt) {
@@ -333,6 +334,7 @@ export function stepBurns(
           attackerId: mob.burnLastAttackerId ?? mob.id,
           amount: applied,
           fatal,
+          skillId: 'burn',
         });
       }
       mob.burnLastTickAt = nowMs;
