@@ -1,0 +1,55 @@
+{
+  "$comment": "Sprite sheet manifest. All sheets are horizontal strips, transparent PNG, native pixel resolution (1 texel = 1 art pixel). Set texture scaleMode = NEAREST and integer scale. 8-dir frame order is always [e, se, s, sw, w, nw, n, ne]; sw/w/nw are horizontal mirrors of se/e/ne. Files follow the Art Bible naming convention.",
+  "defaults": { "format": "png", "alpha": true, "filter": "nearest", "rows": 1 },
+  "sheets": {
+    "hero_pyromancer_idle_8dir.png": {
+      "cols": 8, "rows": 1, "cellW": 16, "cellH": 21,
+      "frames": ["e", "se", "s", "sw", "w", "nw", "n", "ne"],
+      "anchor": [0.5, 0.95], "renderScale": 2,
+      "note": "player Pyromancer. Orb hidden on n/ne/nw facings (drawn separately as a glow in-engine)."
+    },
+    "mob_skeleton_base.png": {
+      "cols": 8, "rows": 1, "cellW": 16, "cellH": 19,
+      "frames": ["e", "se", "s", "sw", "w", "nw", "n", "ne"],
+      "anchor": [0.5, 0.95], "renderScale": 2,
+      "note": "basic skeleton. 'brute' = this sheet at renderScale 2.5 + ui_brute_shield.png overlaid on the screen-near side. 'burning' = this sheet + animated flame overlay (fx, procedural)."
+    },
+    "mob_ghoul.png": {
+      "cols": 8, "rows": 1, "cellW": 16, "cellH": 19,
+      "frames": ["e", "se", "s", "sw", "w", "nw", "n", "ne"],
+      "anchor": [0.5, 0.95], "renderScale": 2,
+      "note": "same silhouette as the skeleton, re-skinned to rotting-green palette."
+    },
+    "mob_bonecaster_8dir.png": {
+      "cols": 8, "rows": 1, "cellW": 16, "cellH": 21,
+      "frames": ["e", "se", "s", "sw", "w", "nw", "n", "ne"],
+      "anchor": [0.5, 0.95], "renderScale": 2,
+      "note": "ranged skull-mage. Necrotic orb hidden on n/ne/nw."
+    },
+    "fx_veilwisp.png": {
+      "cols": 2, "rows": 1, "cellW": 7, "cellH": 8,
+      "frames": ["bob_a", "bob_b"],
+      "anchor": [0.5, 0.6], "renderScale": 3, "fps": 6,
+      "note": "radial (no facing); 2-frame bob loop. Floats ~22px above the tile."
+    },
+    "icon_skills.png": {
+      "cols": 6, "rows": 1, "cellW": 16, "cellH": 16,
+      "frames": ["spark", "cinder", "fireball", "pyroclasm", "combust", "meteor"],
+      "anchor": [0.5, 0.5], "renderScale": 2,
+      "note": "hotbar/inventory icons. Display in a .ts-slot__icon / .ts-item__icon (32×32 at scale 2)."
+    },
+    "ui_brute_shield.png": {
+      "cols": 1, "rows": 1, "cellW": 5, "cellH": 6,
+      "frames": ["shield"],
+      "anchor": [0.5, 0.5], "renderScale": 4,
+      "note": "iron shield overlay for the skeleton brute; draw on the screen-near side."
+    }
+  },
+  "procedural": {
+    "$note": "These are NOT shipped as PNG — they are drawn in-engine (canvas/Pixi Graphics) so they tint/animate freely. Recipes below.",
+    "loot_beacon": "16×16 diamond gem + vertical light beam + ground ring, all tinted by rarity color (white/blue/yellow/green/gold). Gold adds 3 orbiting fire particles.",
+    "fire_fx": "Spark/Fireball/Pyroclasm/Combust/Meteor built from stepped fire-blob discs (white-hot #fff1c4 → ember #ff9f1a → coal #b0301a), blitted nearest-neighbor. Telegraph rings are dashed blob rings.",
+    "burn_flame": "2-frame 5×5 pixel flame (#ff6a2a/#ff8a2a/#ffe9b0) dotted over burning enemies.",
+    "terrain": "64×32 iso diamonds, grass checker #2e3a30/#28342a, rock #2a1a1a, Veil-fissure seam (glowing), ember cracks. Posterized + vignette."
+  }
+}
