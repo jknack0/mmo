@@ -21,6 +21,7 @@ import {
   type InterpolatedMobState,
 } from '../network/snapshot-interpolator.js';
 import { tileToScreen, screenToTile, ISO_TILE_W, ISO_TILE_H } from './iso-coords.js';
+import { fx, SKILL_GLYPH } from './fx.js';
 
 export interface MountWorldSceneOptions {
   container: HTMLElement;
@@ -43,12 +44,6 @@ export interface LocalPlayerStats {
 }
 
 export type WorldSceneCleanup = () => void;
-
-interface Floater {
-  text: Text;
-  life: number;
-  vy: number;
-}
 
 export async function mountWorldScene(
   opts: MountWorldSceneOptions
@@ -93,195 +88,52 @@ export async function mountWorldScene(
   const world = new Container();
   app.stage.addChild(world);
 
+  let worldBaseX = 0;
+  let worldBaseY = 0;
   function recenter(): void {
-    world.x = app.screen.width / 2;
-    world.y = app.screen.height / 5;
+    worldBaseX = app.screen.width / 2;
+    worldBaseY = app.screen.height / 5;
+    world.x = worldBaseX;
+    world.y = worldBaseY;
   }
   recenter();
-  const onResize = () => recenter();
+  const onResize = () => {
+    recenter();
+    sizeFxCanvas();
+  };
   window.addEventListener('resize', onResize);
 
   const terrainLayer = new Container();
   const groundLayer = new Container();
   const entityLayer = new Container();
   entityLayer.sortableChildren = true;
-  const fxLayer = new Container();
-  const floaterLayer = new Container();
-  world.addChild(terrainLayer, groundLayer, entityLayer, fxLayer, floaterLayer);
+  world.addChild(terrainLayer, groundLayer, entityLayer);
 
-  // ─── Per-skill fire FX ─────────────────────────────────────────
-  // Each skill picks a projectile style (caster→target travel) and an impact
-  // style (what happens on the target). Matches the Claude-Design FX recipes.
-  type ProjStyle = 'small' | 'big' | 'lance';
-  type ImpactStyle =
-    | 'small' | 'big' | 'ring' | 'column' | 'meteor' | 'cone' | 'slash' | 'tick';
-  const SKILL_FX: Record<string, { proj?: ProjStyle; impact: ImpactStyle }> = {
-    'basic-attack': { impact: 'slash' },
-    spark: { proj: 'small', impact: 'small' },
-    'cinder-spray': { impact: 'cone' },
-    'heat-wave': { impact: 'ring' },
-    fireball: { proj: 'big', impact: 'big' },
-    'flame-lance': { proj: 'lance', impact: 'small' },
-    combust: { impact: 'ring' },
-    meteor: { impact: 'meteor' },
-    firestorm: { impact: 'big' },
-    'wall-of-flame': { impact: 'cone' },
-    'ember-step': { impact: 'cone' },
-    pyroclasm: { proj: 'big', impact: 'column' },
-    cataclysm: { impact: 'meteor' },
-    burn: { impact: 'tick' },
+  // ─── Pyromancy FX engine (Claude-Design canvas overlay) ────────
+  // The vendored fx engine renders in screen px on a 2D canvas layered over the
+  // Pixi WebGL canvas; we map world tiles → screen px through the world offset.
+  const fxCanvas = document.createElement('canvas');
+  fxCanvas.style.position = 'absolute';
+  fxCanvas.style.inset = '0';
+  fxCanvas.style.pointerEvents = 'none';
+  fxCanvas.style.imageRendering = 'pixelated';
+  opts.container.appendChild(fxCanvas);
+  const fxCtx = fxCanvas.getContext('2d')!;
+  function sizeFxCanvas(): void {
+    fxCanvas.width = opts.container.clientWidth;
+    fxCanvas.height = opts.container.clientHeight;
+    fx.seedEmbers(fxCanvas.width, fxCanvas.height);
+  }
+  sizeFxCanvas();
+  // Meteor screen-shake jitters the world container briefly.
+  let shakeT = 0;
+  (window as unknown as { MMO: { shake: (n: number) => void } }).MMO.shake = (n: number) => {
+    shakeT = Math.max(shakeT, Math.min(0.4, n / 25));
   };
-  const DEFAULT_FX = { proj: 'small' as ProjStyle, impact: 'big' as ImpactStyle };
-  const IMPACT_DUR: Record<ImpactStyle, number> = {
-    small: 0.3, big: 0.45, ring: 0.4, column: 0.46, meteor: 0.75, cone: 0.34, slash: 0.2, tick: 0.26,
-  };
-  const PROJ_DUR: Record<ProjStyle, number> = { small: 0.22, big: 0.32, lance: 0.16 };
-
-  const dia = (r: number) => [0, -r, r, 0, 0, r, -r, 0];
-
-  interface Fx { g: Graphics; life: number; max: number; style: ImpactStyle }
-  const fxs: Fx[] = [];
-
-  function drawFx(g: Graphics, t: number, style: ImpactStyle): void {
-    g.clear();
-    const p = 1 - t; // 0→1 progress
-    const a = Math.min(1, t * 1.5);
-    const burst = (base: number, embers: number) => {
-      const r = base * (0.45 + p);
-      g.poly(dia(r)).fill({ color: 0xb0301a, alpha: 0.55 * a });
-      g.poly(dia(r * 0.66)).fill({ color: 0xff9f1a, alpha: 0.85 * a });
-      g.poly(dia(r * 0.32)).fill({ color: 0xfff1c4, alpha: a });
-      for (let i = 0; i < embers; i++) {
-        const ang = (i / embers) * Math.PI * 2 + p * 2;
-        g.rect(Math.cos(ang) * r * 1.1, Math.sin(ang) * r * 0.66, 2, 2).fill({ color: 0xff9f1a, alpha: a });
-      }
-    };
-    switch (style) {
-      case 'tick': {
-        const r = 3 * (0.6 + p * 0.7);
-        g.poly(dia(r)).fill({ color: 0xff6a3a, alpha: 0.85 * a });
-        g.rect(-1, -r - 1, 2, 2).fill({ color: 0xffe9b0, alpha: a });
-        break;
-      }
-      case 'small': burst(9, 3); break;
-      case 'big': burst(18, 6); break;
-      case 'ring': {
-        const r = 8 + p * 30;
-        g.poly(dia(r)).stroke({ color: 0xff9f1a, width: 3, alpha: a });
-        g.poly(dia(r * 0.7)).stroke({ color: 0xfff1c4, width: 2, alpha: a * 0.8 });
-        break;
-      }
-      case 'column': {
-        const h = 50 * (0.5 + p * 0.6);
-        g.rect(-8, -h, 16, h).fill({ color: 0xb0301a, alpha: 0.4 * a });
-        g.rect(-5, -h, 10, h).fill({ color: 0xff9f1a, alpha: 0.7 * a });
-        g.rect(-2, -h, 4, h).fill({ color: 0xfff1c4, alpha: a });
-        for (let i = 0; i < 4; i++) {
-          const ex = (((i * 977 + 31) % 16) - 8);
-          g.rect(ex, -h * ((i * 0.27 + p) % 1), 2, 2).fill({ color: 0xffd24a, alpha: a });
-        }
-        break;
-      }
-      case 'cone': {
-        for (let i = 0; i < 7; i++) {
-          const ang = -Math.PI / 2 + (i / 6 - 0.5) * 1.4;
-          const d = (6 + p * 22) * (0.6 + (i % 3) * 0.2);
-          const c = i % 2 ? 0xff9f1a : 0xffd24a;
-          g.rect(Math.cos(ang) * d, Math.sin(ang) * d * 0.7, 3, 3).fill({ color: c, alpha: a });
-        }
-        break;
-      }
-      case 'slash': {
-        const w = 18 * (0.5 + p);
-        g.moveTo(-w, -w * 0.5).lineTo(w, -2).lineTo(-w * 0.6, w * 0.5).stroke({ color: 0xffffff, width: 2, alpha: a });
-        break;
-      }
-      case 'meteor': {
-        if (p < 0.62) {
-          const fp = p / 0.62;
-          const fy = -78 + fp * 78;
-          g.circle(0, fy, 7).fill({ color: 0xff6a3a, alpha: 0.5 });
-          g.rect(-3, fy - 3, 6, 6).fill({ color: 0xb0301a });
-          g.rect(-2, fy - 2, 4, 4).fill({ color: 0xff9f1a });
-          g.rect(-1, fy - 8, 2, 6).fill({ color: 0xffd24a, alpha: 0.8 }); // trail up
-        } else {
-          const ip = (p - 0.62) / 0.38;
-          const r = 24 * (0.4 + ip);
-          g.poly(dia(r)).fill({ color: 0xb0301a, alpha: 0.5 * (1 - ip) });
-          g.poly(dia(r * 0.6)).fill({ color: 0xff9f1a, alpha: 0.85 * (1 - ip) });
-          g.poly(dia(r * 1.2)).stroke({ color: 0xffd24a, width: 2, alpha: (1 - ip) });
-        }
-        break;
-      }
-    }
-  }
-
-  function spawnImpactFx(targetTile: Vec2, style: ImpactStyle, fatal: boolean, amount: number): void {
-    const g = new Graphics();
-    const s = tileToScreen(targetTile);
-    g.x = s.x;
-    g.y = s.y - 12;
-    fxLayer.addChild(g);
-    const max = IMPACT_DUR[style];
-    fxs.push({ g, life: max, max, style });
-    spawnFloater(targetTile, fatal ? 'KILL' : `-${amount}`, fatal ? 0xff5555 : 0xffcc66, fatal);
-  }
-
-  // ─── Fire projectiles (caster → target) ───────────────────────
-  interface Proj {
-    g: Graphics;
-    from: Vec2;
-    to: Vec2;
-    t: number;
-    dur: number;
-    projStyle: ProjStyle;
-    targetTile: Vec2;
-    impactStyle: ImpactStyle;
-    fatal: boolean;
-    amount: number;
-  }
-  const projs: Proj[] = [];
-
-  function spawnProjectile(
-    fromTile: Vec2,
-    targetTile: Vec2,
-    projStyle: ProjStyle,
-    impactStyle: ImpactStyle,
-    fatal: boolean,
-    amount: number
-  ): void {
-    const g = new Graphics();
-    fxLayer.addChild(g);
-    const fs = tileToScreen(fromTile);
-    const ts = tileToScreen(targetTile);
-    projs.push({
-      g,
-      from: { x: fs.x, y: fs.y - 22 },
-      to: { x: ts.x, y: ts.y - 12 },
-      t: 0,
-      dur: PROJ_DUR[projStyle],
-      projStyle,
-      targetTile,
-      impactStyle,
-      fatal,
-      amount,
-    });
-  }
-
-  function drawBolt(g: Graphics, x: number, y: number, dx: number, dy: number, style: ProjStyle): void {
-    g.clear();
-    const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len;
-    const uy = dy / len;
-    const k = style === 'big' ? 1.4 : style === 'lance' ? 1.0 : 0.8;
-    const trail = style === 'lance' ? 30 : 16;
-    g.circle(x, y, 9 * k).fill({ color: 0xff9f1a, alpha: 0.22 });
-    g.circle(x, y, 6 * k).fill({ color: 0xff6a3a, alpha: 0.32 });
-    g.rect(x - ux * trail - 1, y - uy * trail - 1, 2, 2).fill({ color: 0xb0301a, alpha: 0.7 });
-    g.rect(x - ux * (trail * 0.7) - 1, y - uy * (trail * 0.7) - 1, 3, 3).fill({ color: 0xe0531f });
-    g.rect(x - ux * 7 - 2, y - uy * 7 - 2, 4 * k, 4 * k).fill({ color: 0xff9f1a });
-    g.rect(x - ux * 3 - 3, y - uy * 3 - 3, 6 * k, 6 * k).fill({ color: 0xffd24a });
-    g.rect(x - 3 * k, y - 3 * k, 6 * k, 6 * k).fill({ color: 0xfff1c4 });
+  /** Tile coords → fx screen px (includes the world container offset). */
+  function tileToFx(tile: Vec2): { x: number; y: number } {
+    const s = tileToScreen(tile);
+    return { x: world.x + s.x, y: world.y + s.y - 16 };
   }
 
   // Deterministic per-tile noise (no flicker between redraws).
@@ -466,27 +318,6 @@ export async function mountWorldScene(
     g.rect(-width / 2, 0, width * pct, 4).fill(color);
   }
 
-  // ─── Damage floaters ──────────────────────────────────────────
-  const floaters: Floater[] = [];
-
-  function spawnFloater(atTile: Vec2, text: string, color: number, isFatal: boolean): void {
-    const t = new Text({
-      text,
-      style: {
-        fontSize: isFatal ? 18 : 14,
-        fill: color,
-        stroke: { color: 0x000000, width: 3 },
-        fontWeight: 'bold',
-      },
-    });
-    t.anchor.set(0.5);
-    const screen = tileToScreen(atTile);
-    t.x = screen.x;
-    t.y = screen.y - 30;
-    floaterLayer.addChild(t);
-    floaters.push({ text: t, life: 1.0, vy: -0.7 });
-  }
-
   // ─── Channel client + interpolator ────────────────────────────
   const client: ChannelClient = createChannelClient({ wsUrl: opts.wsUrl });
   const interp = createSnapshotInterpolator({ lerpRate: 12 });
@@ -513,18 +344,25 @@ export async function mountWorldScene(
         opts.onPickup?.(msg.baseId);
         break;
       case 'damage': {
-        const target = lastMobPos.get(msg.event.targetId);
+        const ev = msg.event;
+        const target = lastMobPos.get(ev.targetId);
         if (!target) break;
-        const cfg = SKILL_FX[msg.event.skillId ?? ''] ?? DEFAULT_FX;
-        const attacker = lastFrame.players.find((p) => p.id === msg.event.attackerId);
-        const far = attacker && Math.hypot(attacker.pos.x - target.x, attacker.pos.y - target.y) > 0.6;
-        // Skills with a projectile fly a bolt from the caster, then impact on
-        // arrival; the rest (and Burn ticks) impact in place.
-        if (cfg.proj && attacker && far) {
-          spawnProjectile(attacker.pos, target, cfg.proj, cfg.impact, msg.event.fatal, msg.event.amount);
-        } else {
-          spawnImpactFx(target, cfg.impact, msg.event.fatal, msg.event.amount);
+        const to = tileToFx(target);
+        // The float + ash fire at impact (after projectile travel / meteor delay).
+        const onImpact = (x: number, y: number) => {
+          fx.spawnFloat(x, y - 18, ev.fatal ? 'KILL' : `-${ev.amount}`, ev.fatal ? '#ff5a5a' : '#ffd27a', !ev.fatal);
+          if (ev.fatal) fx.ash(x, y);
+        };
+        if (ev.skillId === 'burn' || !ev.skillId) {
+          // DoT tick / unattributed — small in-place pop, no cast.
+          fx.emit({ x: to.x, y: to.y, vy: -28, r: 6, max: 0.4, fk: 'burn' });
+          onImpact(to.x, to.y);
+          break;
         }
+        const glyph = SKILL_GLYPH[ev.skillId] ?? { glyph: 'orb', radius: 40 };
+        const attacker = lastFrame.players.find((p) => p.id === ev.attackerId);
+        const from = attacker ? tileToFx(attacker.pos) : { x: to.x, y: to.y - 40 };
+        fx.cast({ glyph: glyph.glyph, radius: glyph.radius ?? 50, delay: glyph.delay ?? 0.6 }, from, to, onImpact);
         break;
       }
       case 'error':
@@ -761,44 +599,22 @@ export async function mountWorldScene(
       }
     }
 
-    // Fire projectiles — fly, then impact on arrival.
-    for (let i = projs.length - 1; i >= 0; i--) {
-      const pr = projs[i]!;
-      pr.t += dt;
-      const p = Math.min(1, pr.t / pr.dur);
-      const x = pr.from.x + (pr.to.x - pr.from.x) * p;
-      const y = pr.from.y + (pr.to.y - pr.from.y) * p;
-      drawBolt(pr.g, x, y, pr.to.x - pr.from.x, pr.to.y - pr.from.y, pr.projStyle);
-      if (p >= 1) {
-        fxLayer.removeChild(pr.g);
-        projs.splice(i, 1);
-        spawnImpactFx(pr.targetTile, pr.impactStyle, pr.fatal, pr.amount);
-      }
+    // ─── Pyromancy FX engine: advance + paint the overlay ────────
+    fx.update(dt);
+    // Meteor shake: jitter the world container around its base, decaying.
+    if (shakeT > 0) {
+      shakeT = Math.max(0, shakeT - dt);
+      const amp = shakeT * 18;
+      world.x = worldBaseX + (Math.random() - 0.5) * amp;
+      world.y = worldBaseY + (Math.random() - 0.5) * amp;
+    } else {
+      world.x = worldBaseX;
+      world.y = worldBaseY;
     }
-
-    // Fire FX impacts
-    for (let i = fxs.length - 1; i >= 0; i--) {
-      const fx = fxs[i]!;
-      fx.life -= dt;
-      if (fx.life <= 0) {
-        fxLayer.removeChild(fx.g);
-        fxs.splice(i, 1);
-        continue;
-      }
-      drawFx(fx.g, fx.life / fx.max, fx.style);
-    }
-
-    // Floaters
-    for (let i = floaters.length - 1; i >= 0; i--) {
-      const f = floaters[i]!;
-      f.text.y += f.vy;
-      f.life -= dt;
-      f.text.alpha = Math.max(0, f.life);
-      if (f.life <= 0) {
-        floaterLayer.removeChild(f.text);
-        floaters.splice(i, 1);
-      }
-    }
+    fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+    fx.drawGround(fxCtx);
+    fx.drawOver(fxCtx);
+    fx.drawFloats(fxCtx);
   });
 
   return () => {
@@ -807,6 +623,7 @@ export async function mountWorldScene(
     client.close();
     window.removeEventListener('resize', onResize);
     window.removeEventListener('keydown', onKeyDown);
+    fxCanvas.remove();
     app.destroy(true, { children: true });
   };
 }
