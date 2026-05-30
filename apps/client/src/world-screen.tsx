@@ -24,46 +24,39 @@ const DEFAULT_STATS: LocalPlayerStats = {
   maxWrath: 100,
 };
 
-function ResourceBar(props: {
-  label: string;
-  current: number;
-  max: number;
-  fillFrom: string;
-  fillTo: string;
-}) {
-  const pct = () => Math.max(0, Math.min(1, props.current / props.max));
+// Octagonal pixel resource orb (Claude Design `.ts-orb`). --fill drives liquid height.
+function Orb(props: { kind: 'spirit' | 'wrath'; current: number; max: number; cap: string }) {
+  const fill = () =>
+    `${Math.max(0, Math.min(100, (props.current / Math.max(1, props.max)) * 100))}%`;
   return (
-    <div class="flex items-center gap-2">
-      <span class="w-12 text-[10px] uppercase tracking-wider text-white/60">
-        {props.label}
-      </span>
-      <div class="relative h-3 w-44 rounded bg-black/60 border border-white/10 overflow-hidden">
-        <div
-          class="absolute inset-y-0 left-0 transition-[width] duration-100"
-          style={{
-            width: `${pct() * 100}%`,
-            background: `linear-gradient(90deg, ${props.fillFrom}, ${props.fillTo})`,
-          }}
-        />
-        <div class="absolute inset-0 flex items-center justify-end pr-1.5 text-[10px] font-mono text-white/80">
-          {Math.round(props.current)}/{props.max}
-        </div>
-      </div>
+    <div class={`ts-orb ts-orb--${props.kind}`} style={{ '--fill': fill() }}>
+      <div class="ts-orb__liquid" />
+      <div class="ts-orb__gloss" />
+      <div class="ts-orb__val">{Math.round(props.current)}</div>
+      <div class="ts-orb__cap">{props.cap}</div>
     </div>
   );
 }
 
-function SkillSlot(props: { hotkey: string; label: string; color: string }) {
+// Pixel hotbar slot (`.ts-slot`). Icon framed from the 6-frame icon_skills sheet.
+function SkillSlot(props: { hotkey: string; icon: number; cost: number; wrath?: boolean }) {
   return (
-    <div class="flex flex-col items-center">
+    <button class="ts-slot" type="button">
       <div
-        class="w-12 h-12 rounded border border-white/20 flex items-center justify-center text-xs font-semibold backdrop-blur"
-        style={{ background: props.color }}
-      >
-        {props.label}
-      </div>
-      <div class="text-[10px] mt-1 text-white/60">{props.hotkey}</div>
-    </div>
+        class="ts-slot__icon"
+        style={{
+          'background-image': 'url(/assets/icon_skills.png)',
+          'background-size': '600% 100%',
+          'background-position': `${(props.icon / 5) * 100}% 0`,
+          'background-repeat': 'no-repeat',
+          'image-rendering': 'pixelated',
+        }}
+      />
+      <div class="ts-slot__cd" />
+      <div class="ts-slot__cdtext" />
+      <div class="ts-slot__key">{props.hotkey}</div>
+      <div class={`ts-slot__cost${props.wrath ? ' ts-slot__cost--wrath' : ''}`}>{props.cost}</div>
+    </button>
   );
 }
 
@@ -104,42 +97,28 @@ export function WorldScreen(props: WorldScreenProps) {
     <div class="absolute inset-0">
       <div ref={mountEl} class="absolute inset-0" />
 
-      {/* HUD: top-left identity + controls hint */}
-      <div class="absolute top-3 left-3 bg-black/60 px-3 py-2 rounded text-sm text-white/80 backdrop-blur">
-        <div>
-          Playing as <span class="text-white font-medium">{props.character.name}</span>
-        </div>
-        <div class="text-xs text-white/40">
-          Click ground to move · Click mob = basic attack · Q = Spark · R = Pyroclasm
-        </div>
+      {/* HUD: top-left zone identity */}
+      <div class="absolute top-3 left-3 px-3 py-2" style={{ background: 'rgba(8,6,6,.55)' }}>
+        <div class="ts-zone-name">The Sundered Reaches</div>
+        <div class="ts-zone-sub">{props.character.name} · click to move · click mob = attack</div>
       </div>
 
-      {/* HUD: bottom-left resource bars */}
-      <div class="absolute bottom-3 left-3 bg-black/60 px-3 py-2 rounded backdrop-blur flex flex-col gap-1.5">
-        <ResourceBar
-          label="Spirit"
-          current={stats().spirit}
-          max={stats().maxSpirit}
-          fillFrom="#3a64a8"
-          fillTo="#6ab0ff"
-        />
-        <ResourceBar
-          label="Wrath"
-          current={stats().wrath}
-          max={stats().maxWrath}
-          fillFrom="#a04a1f"
-          fillTo="#ff8a3a"
-        />
+      {/* HUD: bottom-left resource orbs */}
+      <div class="absolute bottom-3 left-3 flex items-end gap-2">
+        <Orb kind="spirit" current={stats().spirit} max={stats().maxSpirit} cap="SPIRIT" />
+        <Orb kind="wrath" current={stats().wrath} max={stats().maxWrath} cap="WRATH" />
       </div>
 
       {/* HUD: bottom-center 6-slot Pyromancy hotbar */}
-      <div class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 px-3 py-2 rounded backdrop-blur flex gap-2">
-        <SkillSlot hotkey="Q" label="Spark"   color="linear-gradient(180deg, #ff8a3a, #b04a1f)" />
-        <SkillSlot hotkey="W" label="Cinder"  color="linear-gradient(180deg, #ff7a3a, #8a3a1f)" />
-        <SkillSlot hotkey="E" label="Fireball" color="linear-gradient(180deg, #ff6a3a, #a03a1f)" />
-        <SkillSlot hotkey="R" label="Pyro"    color="linear-gradient(180deg, #ffd24a, #a04a1f)" />
-        <SkillSlot hotkey="A" label="Combust" color="linear-gradient(180deg, #ffa83a, #b03a1f)" />
-        <SkillSlot hotkey="S" label="Meteor"  color="linear-gradient(180deg, #ff9a3a, #c03a1f)" />
+      <div class="absolute bottom-4 left-1/2 -translate-x-1/2">
+        <div class="ts-hotbar">
+          <SkillSlot hotkey="Q" icon={0} cost={8} />
+          <SkillSlot hotkey="W" icon={1} cost={12} />
+          <SkillSlot hotkey="E" icon={2} cost={24} />
+          <SkillSlot hotkey="R" icon={3} cost={100} wrath />
+          <SkillSlot hotkey="A" icon={4} cost={30} />
+          <SkillSlot hotkey="S" icon={5} cost={45} />
+        </div>
       </div>
 
       {/* Top-right controls */}

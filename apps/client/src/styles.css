@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 
+/* Pixel-art HUD kit (Claude Design handoff): tokens + component classes. */
+@import './styles/tokens.css';
+@import './styles/hud.css';
+
 @theme {
   --color-brand: #6ab0ff;
   --color-bg-dark: #111;
