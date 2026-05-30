@@ -9,6 +9,8 @@ export {
   getItemBase,
   slotAcceptsBase,
   RARITY_COLOR,
+  TAP_COST,
+  refinementMultiplier,
   type GearSlot,
   type EquipSlot,
   type ItemBase,
@@ -25,6 +27,7 @@ export interface InventoryEntry {
   slot: number;
   affixes: RolledAffix[];
   rarity: Rarity;
+  refinement: number;
 }
 export interface EquippedEntry {
   itemId: string;
@@ -32,6 +35,7 @@ export interface EquippedEntry {
   gearSlot: string;
   affixes: RolledAffix[];
   rarity: Rarity;
+  refinement: number;
 }
 export interface Attributes {
   str: number;
@@ -45,6 +49,7 @@ export interface InventoryView {
   attributes: Attributes;
   armor: number;
   magicFind: number;
+  materials: number;
 }
 
 const EMPTY: InventoryView = {
@@ -53,7 +58,27 @@ const EMPTY: InventoryView = {
   attributes: { str: 0, dex: 0, int: 0, vit: 0 },
   armor: 0,
   magicFind: 0,
+  materials: 0,
 };
+
+export type TapOutcome = 'success' | 'fail' | 'capped';
+export type TapResponse =
+  | { ok: true; outcome: TapOutcome; refinement: number; pityCounter: number; materials: number }
+  | { ok: false; error: string };
+
+export async function tapItem(
+  token: string,
+  characterId: string,
+  itemId: string
+): Promise<TapResponse> {
+  const res = await fetch(`${GATEWAY_URL}/characters/${characterId}/items/${itemId}/tap`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+  });
+  const body = await res.json();
+  if (!res.ok) return { ok: false, error: body.error ?? 'tap-failed' };
+  return { ok: true, ...body };
+}
 
 export async function fetchInventory(token: string, characterId: string): Promise<InventoryView> {
   const res = await fetch(`${GATEWAY_URL}/characters/${characterId}/inventory`, {

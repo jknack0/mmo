@@ -15,6 +15,8 @@ export interface CharactersTable {
   created_at: Generated<Date>;
   last_login_at: Date | null;
   snapshot_state: JSONColumnType<Record<string, unknown>> | null;
+  /** Refinement materials balance (S15). */
+  materials: Generated<number>;
 }
 
 export interface ItemsTable {

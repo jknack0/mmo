@@ -14,6 +14,7 @@ import type { DiscordClient } from '../auth/types.js';
 import { createCharacterRepo } from '../character/character-repo.js';
 import { createCharacterService } from '../character/character-service.js';
 import { createInventoryRepo, type InventoryRepo } from '../inventory/inventory-repo.js';
+import { createTappingService } from '../tapping/tapping-service.js';
 import { buildGatewayServer } from './server.js';
 
 const stubDiscord: DiscordClient = {
@@ -47,6 +48,7 @@ describe('inventory + equip HTTP', () => {
       characters,
       redis,
       inventory,
+      tapping: createTappingService(db),
       clientOrigin: 'http://localhost:5173',
       channelWsUrl: 'ws://channel.test:8081',
     });
@@ -121,7 +123,7 @@ describe('inventory + equip HTTP', () => {
     };
     expect(body.inventory).toEqual([]);
     expect(body.equipped).toEqual([
-      { itemId, baseId: 'apprentice-wand', gearSlot: 'weapon', affixes: [], rarity: 'white' },
+      { itemId, baseId: 'apprentice-wand', gearSlot: 'weapon', affixes: [], rarity: 'white', refinement: 0 },
     ]);
     expect(body.attributes.int).toBe(4);
   });
@@ -155,6 +157,37 @@ describe('inventory + equip HTTP', () => {
     const body = (await res.json()) as { inventory: { itemId: string }[]; equipped: unknown[] };
     expect(body.equipped).toEqual([]);
     expect(body.inventory.map((e) => e.itemId)).toEqual([itemId]);
+  });
+
+  it('tap raises Refinement, consumes materials, and reports it via GET', async () => {
+    const { token, characterId } = await setup('tap@example.com');
+    const { itemId } = await inventory.grantItem(characterId, 'leather-vest'); // white
+    const tap = await fetch(`${url}/characters/${characterId}/items/${itemId}/tap`, {
+      method: 'POST',
+      headers: authJson(token),
+    });
+    expect(tap.status).toBe(200);
+    const body = (await tap.json()) as { outcome: string; refinement: number; materials: number };
+    // White +0→+1 has 95% success; with the real RNG this is usually success,
+    // but assert only the invariants that always hold.
+    expect(['success', 'fail']).toContain(body.outcome);
+    expect(body.materials).toBe(90); // a real attempt always spends TAP_COST
+    const inv = await fetch(`${url}/characters/${characterId}/inventory`, { headers: auth(token) });
+    const view = (await inv.json()) as { materials: number; inventory: { refinement: number }[] };
+    expect(view.materials).toBe(90);
+    expect(view.inventory[0]!.refinement).toBe(body.outcome === 'success' ? 1 : 0);
+  });
+
+  it('tap on another account’s item is rejected', async () => {
+    const a = await setup('owner2@example.com');
+    const b = await setup('intruder2@example.com');
+    const { itemId } = await inventory.grantItem(a.characterId, 'leather-vest');
+    // b tries to tap a's item via b's own character route — character 404 first.
+    const res = await fetch(`${url}/characters/${b.characterId}/items/${itemId}/tap`, {
+      method: 'POST',
+      headers: authJson(b.token),
+    });
+    expect(res.status).toBe(400); // not-owner (item belongs to a)
   });
 
   it('401 without a token', async () => {

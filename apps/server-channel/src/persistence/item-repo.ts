@@ -14,6 +14,7 @@ import type { RolledAffix } from '@mmo/domain';
 export interface ChannelEquippedInstance {
   baseId: string;
   affixes: RolledAffix[];
+  refinement: number;
 }
 
 export interface ChannelItemRepo {
@@ -68,10 +69,10 @@ export function createChannelItemRepo(db: Kysely<ChannelDatabase>): ChannelItemR
       const rows = await db
         .selectFrom('equipped')
         .innerJoin('items', 'items.id', 'equipped.item_id')
-        .select(['items.base_id as baseId', 'items.affixes as affixes'])
+        .select(['items.base_id as baseId', 'items.affixes as affixes', 'items.refinement as refinement'])
         .where('equipped.character_id', '=', characterId)
         .execute();
-      return rows.map((r) => ({ baseId: r.baseId, affixes: (r.affixes ?? []) as RolledAffix[] }));
+      return rows.map((r) => ({ baseId: r.baseId, affixes: (r.affixes ?? []) as RolledAffix[], refinement: r.refinement }));
     },
   };
 }

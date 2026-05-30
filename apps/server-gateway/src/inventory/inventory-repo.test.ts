@@ -69,7 +69,7 @@ describe('InventoryRepo', () => {
     expect(await repo.listInventory(characterId)).toEqual([]);
     const eq = await repo.listEquipped(characterId);
     expect(eq).toEqual([
-      { itemId, baseId: 'rusty-sword', gearSlot: 'weapon', affixes: [], rarity: 'white' },
+      { itemId, baseId: 'rusty-sword', gearSlot: 'weapon', affixes: [], rarity: 'white', refinement: 0 },
     ]);
     expect((await repo.equippedInstances(characterId)).map((e) => e.baseId)).toEqual(['rusty-sword']);
   });

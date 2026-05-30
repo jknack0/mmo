@@ -15,6 +15,7 @@ import {
   isValidAllocation,
 } from '../passive/passive-store.js';
 import type { InventoryRepo } from '../inventory/inventory-repo.js';
+import type { TappingService } from '../tapping/tapping-service.js';
 import {
   getItemBase,
   slotAcceptsBase,
@@ -27,6 +28,7 @@ export interface GatewayServerOptions {
   characters: CharacterService;
   redis: RedisClient;
   inventory: InventoryRepo;
+  tapping: TappingService;
   /** Origin the client SPA is served from. Discord callback redirects here. */
   clientOrigin: string;
   /** WS URL of the single hardcoded channel (until S04 wires ChannelRouter). */
@@ -54,6 +56,7 @@ const PASSIVE_PATH = /^\/characters\/([0-9a-f-]{36})\/passives$/;
 const INVENTORY_PATH = /^\/characters\/([0-9a-f-]{36})\/inventory$/;
 const EQUIP_PATH = /^\/characters\/([0-9a-f-]{36})\/equip$/;
 const UNEQUIP_PATH = /^\/characters\/([0-9a-f-]{36})\/unequip$/;
+const TAP_PATH = /^\/characters\/([0-9a-f-]{36})\/items\/([0-9a-f-]{36})\/tap$/;
 
 function setCors(res: ServerResponse, origin: string): void {
   res.setHeader('Access-Control-Allow-Origin', origin);
@@ -83,7 +86,7 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 }
 
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
-  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory } = opts;
+  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping } = opts;
 
   // Compute the character's attribute sheet from currently-equipped items
   // (base stats + stat affixes), plus the Magic Find baseline (S14).
@@ -322,12 +325,40 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           sendJson(res, 404, { error: 'character-not-found' });
           return;
         }
-        const [carried, equipped, sheet] = await Promise.all([
+        const [carried, equipped, sheet, materials] = await Promise.all([
           inventory.listInventory(characterId),
           inventory.listEquipped(characterId),
           attributeSheet(characterId),
+          inventory.getMaterials(characterId),
         ]);
-        sendJson(res, 200, { inventory: carried, equipped, ...sheet });
+        sendJson(res, 200, { inventory: carried, equipped, ...sheet, materials });
+        return;
+      }
+
+      // ─── POST /characters/:id/items/:itemId/tap ───────────────
+      const tapMatch = TAP_PATH.exec(url.pathname);
+      if (tapMatch && req.method === 'POST') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const characterId = tapMatch[1]!;
+        const itemId = tapMatch[2]!;
+        const character = await characters.loadCharacter(session.accountId, characterId);
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        const result = await tapping.attemptRefinement(itemId, session.accountId);
+        if (!result.ok) {
+          const status = result.error === 'not-found' ? 404 : 400;
+          sendJson(res, status, { error: result.error });
+          return;
+        }
+        sendJson(res, 200, {
+          outcome: result.outcome,
+          refinement: result.refinement,
+          pityCounter: result.pityCounter,
+          materials: result.materials,
+        });
         return;
       }
 
