@@ -16,11 +16,13 @@ import {
 } from '../passive/passive-store.js';
 import type { InventoryRepo } from '../inventory/inventory-repo.js';
 import type { TappingService } from '../tapping/tapping-service.js';
+import type { VendorService } from '../vendor/vendor-service.js';
 import {
   getItemBase,
   slotAcceptsBase,
   aggregateEquipped,
   computeDerivedStats,
+  VENDOR_CATALOG,
 } from '@mmo/domain';
 
 export interface GatewayServerOptions {
@@ -29,6 +31,7 @@ export interface GatewayServerOptions {
   redis: RedisClient;
   inventory: InventoryRepo;
   tapping: TappingService;
+  vendor: VendorService;
   /** Origin the client SPA is served from. Discord callback redirects here. */
   clientOrigin: string;
   /** WS URL of the single hardcoded channel (until S04 wires ChannelRouter). */
@@ -57,6 +60,8 @@ const INVENTORY_PATH = /^\/characters\/([0-9a-f-]{36})\/inventory$/;
 const EQUIP_PATH = /^\/characters\/([0-9a-f-]{36})\/equip$/;
 const UNEQUIP_PATH = /^\/characters\/([0-9a-f-]{36})\/unequip$/;
 const TAP_PATH = /^\/characters\/([0-9a-f-]{36})\/items\/([0-9a-f-]{36})\/tap$/;
+const VENDOR_BUY_PATH = /^\/characters\/([0-9a-f-]{36})\/vendor\/buy$/;
+const VENDOR_SELL_PATH = /^\/characters\/([0-9a-f-]{36})\/vendor\/sell$/;
 
 function setCors(res: ServerResponse, origin: string): void {
   res.setHeader('Access-Control-Allow-Origin', origin);
@@ -86,7 +91,18 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 }
 
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
-  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping } = opts;
+  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping, vendor } = opts;
+
+  // Snapshot the inventory view a vendor trade returns: refreshed carried items,
+  // gold, and materials so the client re-renders in one round trip.
+  async function vendorView(characterId: string) {
+    const [carried, gold, materials] = await Promise.all([
+      inventory.listInventory(characterId),
+      inventory.getGold(characterId),
+      inventory.getMaterials(characterId),
+    ]);
+    return { inventory: carried, gold, materials };
+  }
 
   // Compute the character's attribute sheet from currently-equipped items
   // (base stats + stat affixes), plus the Magic Find baseline (S14).
@@ -325,13 +341,14 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           sendJson(res, 404, { error: 'character-not-found' });
           return;
         }
-        const [carried, equipped, sheet, materials] = await Promise.all([
+        const [carried, equipped, sheet, materials, gold] = await Promise.all([
           inventory.listInventory(characterId),
           inventory.listEquipped(characterId),
           attributeSheet(characterId),
           inventory.getMaterials(characterId),
+          inventory.getGold(characterId),
         ]);
-        sendJson(res, 200, { inventory: carried, equipped, ...sheet, materials });
+        sendJson(res, 200, { inventory: carried, equipped, ...sheet, materials, gold });
         return;
       }
 
@@ -359,6 +376,62 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           pityCounter: result.pityCounter,
           materials: result.materials,
         });
+        return;
+      }
+
+      // ─── GET /vendor (static catalog) ─────────────────────────
+      if (req.method === 'GET' && url.pathname === '/vendor') {
+        sendJson(res, 200, { catalog: VENDOR_CATALOG });
+        return;
+      }
+
+      // ─── POST /characters/:id/vendor/buy ──────────────────────
+      const buyMatch = VENDOR_BUY_PATH.exec(url.pathname);
+      if (buyMatch && req.method === 'POST') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const characterId = buyMatch[1]!;
+        const character = await characters.loadCharacter(session.accountId, characterId);
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        const body = await readJsonBody<{ baseId?: string }>(req);
+        if (!body.baseId) {
+          sendJson(res, 400, { error: 'missing-fields' });
+          return;
+        }
+        const result = await vendor.buy(characterId, session.accountId, body.baseId);
+        if (!result.ok) {
+          sendJson(res, 400, { error: result.reason });
+          return;
+        }
+        sendJson(res, 200, { ...(await vendorView(characterId)) });
+        return;
+      }
+
+      // ─── POST /characters/:id/vendor/sell ─────────────────────
+      const sellMatch = VENDOR_SELL_PATH.exec(url.pathname);
+      if (sellMatch && req.method === 'POST') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const characterId = sellMatch[1]!;
+        const character = await characters.loadCharacter(session.accountId, characterId);
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        const body = await readJsonBody<{ itemId?: string }>(req);
+        if (!body.itemId) {
+          sendJson(res, 400, { error: 'missing-fields' });
+          return;
+        }
+        const result = await vendor.sell(characterId, session.accountId, body.itemId);
+        if (!result.ok) {
+          sendJson(res, 400, { error: result.reason });
+          return;
+        }
+        sendJson(res, 200, { value: result.value, ...(await vendorView(characterId)) });
         return;
       }
 

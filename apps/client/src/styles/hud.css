@@ -33,6 +33,7 @@
   height:var(--fill,100%); transition:height .12s steps(8); }
 .ts-orb--spirit .ts-orb__liquid{ background:linear-gradient(180deg,#9fd0ff 0 14%,#6ab0ff 14% 44%,#3a64a8 44% 76%,#22386a 76% 100%); }
 .ts-orb--wrath  .ts-orb__liquid{ background:linear-gradient(180deg,#ffc070 0 14%,#ff8a3a 14% 44%,#a04a1f 44% 76%,#4a1f0d 76% 100%); }
+.ts-orb--hp     .ts-orb__liquid{ background:linear-gradient(180deg,#ff9a9a 0 14%,#ff4d4d 14% 44%,#aa2222 44% 76%,#5a0f0f 76% 100%); }
 .ts-orb__liquid::before{ content:""; position:absolute; left:14%; top:0; width:22%; height:5px; background:rgba(255,255,255,.45); }
 .ts-orb__gloss{ position:absolute; left:20%; top:18%; width:16px; height:8px; pointer-events:none; background:rgba(255,255,255,.4); }
 .ts-orb__val{ position:absolute; left:0; right:0; top:44%; transform:translateY(-50%); text-align:center;

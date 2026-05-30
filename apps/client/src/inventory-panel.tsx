@@ -8,6 +8,9 @@ import {
   EQUIP_SLOTS,
   getItemBase,
   slotAcceptsBase,
+  isConsumable,
+  getConsumable,
+  itemDisplayName,
   fetchInventory,
   equipItem,
   unequipItem,
@@ -26,6 +29,8 @@ export interface InventoryPanelProps {
   characterId: string;
   /** Bump to force a refetch (e.g. after a world pickup). */
   refreshKey: number;
+  /** Use a consumable from the bag — sent over the channel (heals in-world). */
+  onUse: (itemId: string) => void;
   onClose: () => void;
 }
 
@@ -52,15 +57,21 @@ function statLine(baseId: string): string {
 
 /** Rarity-colored name + base stats + affix lines (D2-style tooltip body). */
 function ItemTooltip(props: { baseId: string; rarity: Rarity; affixes: RolledAffix[]; refinement?: number }) {
+  const consumable = () => getConsumable(props.baseId);
   return (
     <>
-      <div class="text-sm font-medium" style={{ color: RARITY_COLOR[props.rarity] }}>
-        {getItemBase(props.baseId)?.name ?? props.baseId}
+      <div class="text-sm font-medium" style={{ color: consumable() ? '#5ad17a' : RARITY_COLOR[props.rarity] }}>
+        {itemDisplayName(props.baseId)}
         <Show when={(props.refinement ?? 0) > 0}>
           <span class="text-[#ff9f1a] font-bold"> +{props.refinement}</span>
         </Show>
       </div>
-      <div class="text-[10px] text-white/45">{statLine(props.baseId)}</div>
+      <Show
+        when={consumable()}
+        fallback={<div class="text-[10px] text-white/45">{statLine(props.baseId)}</div>}
+      >
+        <div class="text-[11px]" style={{ color: '#7CFC9A' }}>Restores {consumable()!.heal} HP · click to use</div>
+      </Show>
       <For each={props.affixes}>
         {(a) => (
           <div
@@ -83,6 +94,7 @@ export function InventoryPanel(props: InventoryPanelProps) {
     armor: 0,
     magicFind: 0,
     materials: 0,
+    gold: 0,
   });
   const [busy, setBusy] = createSignal(false);
   // Tapping: the item awaiting a tap-confirmation, and the last outcome.
@@ -148,6 +160,15 @@ export function InventoryPanel(props: InventoryPanelProps) {
     const next = await unequipItem(props.token, props.characterId, gearSlot);
     if (next) setView(next);
     setBusy(false);
+  }
+
+  // Consumables resolve over the channel (the heal lands on the in-world player).
+  // Optimistically drop the item from the bag; the server's `consumed` ack bumps
+  // refreshKey to reconcile.
+  function onUseConsumable(entry: InventoryEntry) {
+    props.onUse(entry.itemId);
+    setView((v) => ({ ...v, inventory: v.inventory.filter((i) => i.itemId !== entry.itemId) }));
+    setTapMsg({ text: `Used ${getConsumable(entry.baseId)?.name ?? entry.baseId}.`, color: '#5ad17a' });
   }
 
   const attr = () => view().attributes;
@@ -225,16 +246,19 @@ export function InventoryPanel(props: InventoryPanelProps) {
                     <button
                       type="button"
                       disabled={busy()}
-                      onClick={() => onEquip(it.itemId, it.baseId)}
+                      onClick={() =>
+                        isConsumable(it.baseId) ? onUseConsumable(it) : onEquip(it.itemId, it.baseId)
+                      }
                       onContextMenu={(e) => {
                         e.preventDefault();
+                        if (isConsumable(it.baseId)) return; // consumables aren't refinable
                         setTapMsg(null);
                         setTapTarget(it);
                       }}
                       class="text-left px-3 py-2 hover:brightness-110 cursor-pointer transition-all"
                       style={{
                         background: 'var(--slot-fill, #13100d)',
-                        'box-shadow': `0 0 0 2px #080706, 0 0 0 4px ${RARITY_COLOR[it.rarity]}, 0 0 0 6px #080706`,
+                        'box-shadow': `0 0 0 2px #080706, 0 0 0 4px ${isConsumable(it.baseId) ? '#5ad17a' : RARITY_COLOR[it.rarity]}, 0 0 0 6px #080706`,
                       }}
                     >
                       <ItemTooltip baseId={it.baseId} rarity={it.rarity} affixes={it.affixes} refinement={it.refinement} />

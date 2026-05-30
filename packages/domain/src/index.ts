@@ -17,3 +17,5 @@ export * from './drop-table.js';
 export * from './affixes.js';
 // S15 (#17): refinement / tapping.
 export * from './refinement.js';
+// S16 (#18): consumables + vendor economy.
+export * from './consumables.js';

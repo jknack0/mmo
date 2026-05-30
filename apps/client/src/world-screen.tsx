@@ -5,10 +5,11 @@
 import { onMount, onCleanup, createSignal, Show } from 'solid-js';
 import type { Character } from './character-client.js';
 import { connect } from './network/gateway-client.js';
-import { mountWorldScene, type LocalPlayerStats } from './world/world-scene.js';
+import { mountWorldScene, type LocalPlayerStats, type WorldSceneControls } from './world/world-scene.js';
 import { TripodPanel } from './tripod-panel.js';
 import { PassiveTreePanel } from './passive-tree-panel.js';
 import { InventoryPanel } from './inventory-panel.js';
+import { VendorPanel } from './vendor-panel.js';
 
 export interface WorldScreenProps {
   sessionToken: string;
@@ -22,10 +23,12 @@ const DEFAULT_STATS: LocalPlayerStats = {
   maxSpirit: 100,
   wrath: 0,
   maxWrath: 100,
+  hp: 100,
+  maxHp: 100,
 };
 
 // Octagonal pixel resource orb (Claude Design `.ts-orb`). --fill drives liquid height.
-function Orb(props: { kind: 'spirit' | 'wrath'; current: number; max: number; cap: string }) {
+function Orb(props: { kind: 'spirit' | 'wrath' | 'hp'; current: number; max: number; cap: string }) {
   const fill = () =>
     `${Math.max(0, Math.min(100, (props.current / Math.max(1, props.max)) * 100))}%`;
   return (
@@ -66,9 +69,11 @@ export function WorldScreen(props: WorldScreenProps) {
   const [showTripods, setShowTripods] = createSignal(false);
   const [showPassives, setShowPassives] = createSignal(false);
   const [showInventory, setShowInventory] = createSignal(false);
+  const [showVendor, setShowVendor] = createSignal(false);
   const [pickupKey, setPickupKey] = createSignal(0);
   let mountEl: HTMLDivElement | undefined;
   let cleanup: (() => void) | null = null;
+  let controls: WorldSceneControls | null = null;
 
   onMount(async () => {
     try {
@@ -83,6 +88,8 @@ export function WorldScreen(props: WorldScreenProps) {
         onDisconnected: () => setError('Disconnected from channel.'),
         onStats: setStats,
         onPickup: () => setPickupKey((k) => k + 1),
+        onConsumed: () => setPickupKey((k) => k + 1),
+        onControls: (c) => (controls = c),
       });
     } catch (e) {
       setError((e as Error).message);
@@ -105,6 +112,7 @@ export function WorldScreen(props: WorldScreenProps) {
 
       {/* HUD: bottom-left resource orbs */}
       <div class="absolute bottom-3 left-3 flex items-end gap-2">
+        <Orb kind="hp" current={stats().hp} max={stats().maxHp} cap="HEALTH" />
         <Orb kind="spirit" current={stats().spirit} max={stats().maxSpirit} cap="SPIRIT" />
         <Orb kind="wrath" current={stats().wrath} max={stats().maxWrath} cap="WRATH" />
       </div>
@@ -147,6 +155,13 @@ export function WorldScreen(props: WorldScreenProps) {
         <button
           type="button"
           class="ts-btn"
+          onClick={() => setShowVendor(true)}
+        >
+          Vendor
+        </button>
+        <button
+          type="button"
+          class="ts-btn"
           onClick={props.onLeave}
         >
           Back
@@ -181,7 +196,18 @@ export function WorldScreen(props: WorldScreenProps) {
           token={props.sessionToken}
           characterId={props.character.id}
           refreshKey={pickupKey()}
+          onUse={(itemId) => controls?.useItem(itemId)}
           onClose={() => setShowInventory(false)}
+        />
+      </Show>
+
+      <Show when={showVendor()}>
+        <VendorPanel
+          token={props.sessionToken}
+          characterId={props.character.id}
+          refreshKey={pickupKey()}
+          onChanged={() => setPickupKey((k) => k + 1)}
+          onClose={() => setShowVendor(false)}
         />
       </Show>
 

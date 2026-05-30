@@ -50,6 +50,7 @@ export interface InventoryRepo {
   equip(characterId: string, itemId: string, gearSlot: string): Promise<EquipResult>;
   unequip(characterId: string, gearSlot: string): Promise<boolean>;
   getMaterials(characterId: string): Promise<number>;
+  getGold(characterId: string): Promise<number>;
 }
 
 /** Smallest non-negative slot index not already occupied. */
@@ -165,6 +166,15 @@ export function createInventoryRepo(db: Kysely<Database>): InventoryRepo {
         .where('id', '=', characterId)
         .executeTakeFirst();
       return row?.materials ?? 0;
+    },
+
+    async getGold(characterId) {
+      const row = await db
+        .selectFrom('characters')
+        .select('gold')
+        .where('id', '=', characterId)
+        .executeTakeFirst();
+      return row?.gold ?? 0;
     },
 
     async equip(characterId, itemId, gearSlot) {

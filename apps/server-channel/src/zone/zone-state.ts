@@ -47,6 +47,9 @@ export interface ServerPlayer {
   passives: PassiveAllocation;
   /** Folded passive effects applied throughout combat (S10 #12). */
   derivedStats: DerivedStats;
+  /** Current health (S16). maxHp comes from derivedStats (base + VIT). */
+  hp: number;
+  maxHp: number;
 }
 
 export interface ServerMob {
@@ -68,6 +71,8 @@ export interface ServerMob {
   burnLastTickAt: number;
   /** PlayerId most recently responsible for the active Burn — receives credit for ticks. */
   burnLastAttackerId: PlayerId | null;
+  /** Wall-clock ms when this mob may next deal contact damage (S16 aggro). */
+  attackReadyAt: number;
 }
 
 /** A dropped item lying in the world (S13/S14). `id` is the server-issued item UUID. */
@@ -191,6 +196,8 @@ export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPla
     tripods: input.tripods ?? {},
     passives,
     derivedStats,
+    hp: derivedStats.maxHp,
+    maxHp: derivedStats.maxHp,
   };
   zone.players.set(input.id, player);
   return player;
@@ -215,6 +222,7 @@ export function spawnMob(zone: ZoneState, input: MobSpawnInput): ServerMob {
     burnExpiresAt: 0,
     burnLastTickAt: 0,
     burnLastAttackerId: null,
+    attackReadyAt: 0,
   };
   zone.mobs.set(input.id, mob);
   return mob;
@@ -399,6 +407,97 @@ export function stepMobs(zone: ZoneState, nowMs: number): void {
   }
 }
 
+// ─── Mob aggro + contact damage (S16) ─────────────────────────
+// A minimal melee threat so player HP is a live resource the potion can heal.
+// Alive mobs chase the nearest player within aggro range and bite on a cadence
+// when in contact; lethal contact respawns the player at full HP (no death
+// screen at alpha). Real ranged/telegraphed enemy attacks land in S18.
+
+export const MOB_AGGRO_TILES = 6;
+/** Within this distance a mob bites. */
+export const MOB_CONTACT_TILES = 1.2;
+/**
+ * A chasing mob walks to this distance — strictly inside MOB_CONTACT_TILES — so
+ * it always crosses into bite range rather than parking exactly on the boundary
+ * (where floating-point `d > contact` would stay true forever and never bite).
+ */
+export const MOB_STOP_TILES = 0.8;
+export const MOB_SPEED_TILES_PER_SEC = 2;
+export const MOB_CONTACT_DAMAGE = 6;
+export const MOB_ATTACK_COOLDOWN_MS = 1_000;
+
+export interface MobHit {
+  playerId: PlayerId;
+  mobId: EntityId;
+  amount: number;
+  /** True when this hit dropped the player to 0 (and they were respawned). */
+  fatal: boolean;
+}
+
+function nearestPlayer(zone: ZoneState, pos: Vec2, radius: number): ServerPlayer | undefined {
+  let best: ServerPlayer | undefined;
+  let bestDist = radius;
+  for (const p of zone.players.values()) {
+    const d = Math.hypot(p.pos.x - pos.x, p.pos.y - pos.y);
+    if (d <= bestDist) {
+      best = p;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+function respawnPlayer(zone: ZoneState, player: ServerPlayer): void {
+  player.hp = player.maxHp;
+  player.pos = { x: Math.floor(zone.size.x / 2), y: Math.floor(zone.size.y / 2) };
+  player.target = null;
+  player.attackState = { kind: 'idle' };
+}
+
+/**
+ * One tick of mob aggression. Each alive mob homes on the nearest player in
+ * range: it closes the distance, then bites for MOB_CONTACT_DAMAGE once its
+ * attack cooldown is ready (dodge i-frames block the bite). Returns the hits
+ * landed this tick so the server can broadcast damage feedback.
+ */
+export function stepMobAggro(zone: ZoneState, dtSec: number, nowMs: number): MobHit[] {
+  const hits: MobHit[] = [];
+  const step = MOB_SPEED_TILES_PER_SEC * dtSec;
+  for (const mob of zone.mobs.values()) {
+    if (!mob.alive) continue;
+    const target = nearestPlayer(zone, mob.pos, MOB_AGGRO_TILES);
+    if (!target) continue;
+
+    const dx = target.pos.x - mob.pos.x;
+    const dy = target.pos.y - mob.pos.y;
+    const d = Math.hypot(dx, dy);
+
+    if (d > MOB_CONTACT_TILES) {
+      // Close the distance, stopping at MOB_STOP_TILES (inside bite range) so a
+      // mob can't asymptotically idle on the contact boundary without ever biting.
+      const move = Math.min(step, d - MOB_STOP_TILES);
+      if (move > 0 && d > 0) {
+        mob.pos.x += (dx / d) * move;
+        mob.pos.y += (dy / d) * move;
+      }
+      continue;
+    }
+
+    // In contact — bite if off cooldown and the player isn't dodging.
+    if (nowMs < mob.attackReadyAt) continue;
+    if (nowMs < target.dodgeInvulUntil) continue;
+    mob.attackReadyAt = nowMs + MOB_ATTACK_COOLDOWN_MS;
+    target.hp = Math.max(0, target.hp - MOB_CONTACT_DAMAGE);
+    let fatal = false;
+    if (target.hp <= 0) {
+      fatal = true;
+      respawnPlayer(zone, target);
+    }
+    hits.push({ playerId: target.id, mobId: mob.id, amount: MOB_CONTACT_DAMAGE, fatal });
+  }
+  return hits;
+}
+
 function isWalkable(zone: ZoneState, pos: Vec2): boolean {
   const tx = Math.floor(pos.x);
   const ty = Math.floor(pos.y);
@@ -468,6 +567,8 @@ export function snapshotZone(zone: ZoneState): ZoneSnapshot {
       maxSpirit: p.resources.maxSpirit,
       wrath: p.resources.wrath,
       maxWrath: p.resources.maxWrath,
+      hp: p.hp,
+      maxHp: p.maxHp,
     });
   }
   const mobs: MobState[] = [];

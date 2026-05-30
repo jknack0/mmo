@@ -19,6 +19,7 @@ import {
   setPlayerTarget,
   stepMovement,
   stepMobs,
+  stepMobAggro,
   stepBurns,
   performDodge,
   snapshotZone,
@@ -39,6 +40,7 @@ interface Connection {
   ws: WebSocket;
   playerId: PlayerId | null; // null until Hello validates
   characterId: string | null;
+  accountId: string | null; // set on Hello; recorded on audit rows
 }
 
 export interface ChannelServerOptions {
@@ -131,6 +133,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       const playerId = randomUUID();
       conn.playerId = playerId;
       conn.characterId = msg.characterId;
+      conn.accountId = session.accountId;
       // Load saved tripod + passive loadouts (Redis) and equipped gear
       // (Postgres) so S09/S10/S13 selections take effect from the first cast.
       // equippedPyroSkillCount defaults to the full 6-of-6 Pyro hotbar at
@@ -183,9 +186,32 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         await handlePickup(ws, conn, msg.itemId);
         return;
       }
+      case 'use-item': {
+        await handleUseItem(ws, conn, msg.itemId);
+        return;
+      }
       case 'hello':
         return;
     }
+  }
+
+  /**
+   * Use a consumable: remove it from inventory + write the audit row (channel
+   * item-repo, one transaction) and apply its heal to the in-world player. The
+   * player is server-authoritative, so the heal lands here and surfaces via the
+   * next snapshot's hp; a `consumed` ack lets the client drop the item + float.
+   */
+  async function handleUseItem(ws: WebSocket, conn: Connection, itemId: string): Promise<void> {
+    if (!itemRepo || !conn.playerId || !conn.characterId) return;
+    const player = zone.players.get(conn.playerId);
+    if (!player) return;
+    const result = await itemRepo.consume(conn.characterId, conn.accountId, itemId);
+    if (!result) {
+      send(ws, { type: 'error', reason: 'cannot-consume' });
+      return;
+    }
+    player.hp = Math.min(player.maxHp, player.hp + result.heal);
+    send(ws, { type: 'consumed', itemId, heal: result.heal });
   }
 
   /**
@@ -255,6 +281,21 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
     }
     stepMovement(zone, dtSec);
     stepMobs(zone, now);
+    // Mob aggro — chase + contact damage. Player hp surfaces via the snapshot;
+    // each bite also broadcasts a damage event (target = the player) so the
+    // client can float the number. skillId 'mob-contact' tags it for FX.
+    for (const hit of stepMobAggro(zone, dtSec, now)) {
+      broadcast({
+        type: 'damage',
+        event: {
+          targetId: hit.playerId,
+          attackerId: hit.mobId,
+          amount: hit.amount,
+          fatal: hit.fatal,
+          skillId: 'mob-contact',
+        },
+      });
+    }
     const payload = encodeServerMessage({ type: 'snapshot', snapshot: snapshotZone(zone) });
     for (const { ws } of connections.values()) {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload);
@@ -270,7 +311,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         });
         wss.on('error', reject);
         wss.on('connection', (ws) => {
-          const conn: Connection = { ws, playerId: null, characterId: null };
+          const conn: Connection = { ws, playerId: null, characterId: null, accountId: null };
           connections.set(ws, conn);
 
           ws.on('message', (data) => {

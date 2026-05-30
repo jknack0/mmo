@@ -11,13 +11,32 @@ export {
   RARITY_COLOR,
   TAP_COST,
   refinementMultiplier,
+  CONSUMABLES,
+  VENDOR_CATALOG,
+  isConsumable,
+  getConsumable,
+  vendorEntry,
+  sellValue,
   type GearSlot,
   type EquipSlot,
   type ItemBase,
   type Rarity,
   type RolledAffix,
+  type ConsumableDef,
+  type VendorEntry,
 } from '@mmo/domain';
-import type { RolledAffix, Rarity } from '@mmo/domain';
+import { getItemBase, getConsumable, vendorEntry } from '@mmo/domain';
+import type { RolledAffix, Rarity, VendorEntry } from '@mmo/domain';
+
+/** Human name for any base id — gear, consumable, or vendor-only material bundle. */
+export function itemDisplayName(baseId: string): string {
+  return (
+    getItemBase(baseId)?.name ??
+    getConsumable(baseId)?.name ??
+    vendorEntry(baseId)?.name ??
+    baseId
+  );
+}
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ?? 'http://localhost:8080';
 
@@ -50,6 +69,7 @@ export interface InventoryView {
   armor: number;
   magicFind: number;
   materials: number;
+  gold: number;
 }
 
 const EMPTY: InventoryView = {
@@ -59,6 +79,7 @@ const EMPTY: InventoryView = {
   armor: 0,
   magicFind: 0,
   materials: 0,
+  gold: 0,
 };
 
 export type TapOutcome = 'success' | 'fail' | 'capped';
@@ -115,4 +136,52 @@ export async function unequipItem(
   });
   if (!res.ok) return null;
   return (await res.json()) as InventoryView;
+}
+
+// ─── Vendor (S16 #18) ─────────────────────────────────────────
+
+/** What a buy/sell returns: refreshed bag view fields the vendor screen rerenders. */
+export interface VendorView {
+  inventory: InventoryEntry[];
+  gold: number;
+  materials: number;
+  /** Gold credited (sell only). */
+  value?: number;
+}
+
+export async function fetchVendorCatalog(): Promise<VendorEntry[]> {
+  const res = await fetch(`${GATEWAY_URL}/vendor`);
+  if (!res.ok) return [];
+  const body = (await res.json()) as { catalog: VendorEntry[] };
+  return body.catalog;
+}
+
+export async function buyItem(
+  token: string,
+  characterId: string,
+  baseId: string
+): Promise<VendorView | { error: string }> {
+  const res = await fetch(`${GATEWAY_URL}/characters/${characterId}/vendor/buy`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ baseId }),
+  });
+  const body = await res.json();
+  if (!res.ok) return { error: body.error ?? 'buy-failed' };
+  return body as VendorView;
+}
+
+export async function sellItem(
+  token: string,
+  characterId: string,
+  itemId: string
+): Promise<VendorView | { error: string }> {
+  const res = await fetch(`${GATEWAY_URL}/characters/${characterId}/vendor/sell`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ itemId }),
+  });
+  const body = await res.json();
+  if (!res.ok) return { error: body.error ?? 'sell-failed' };
+  return body as VendorView;
 }

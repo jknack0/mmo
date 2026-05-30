@@ -34,6 +34,15 @@ export interface MountWorldSceneOptions {
   onStats?: (s: LocalPlayerStats) => void;
   /** Called when the server confirms a loot pickup (so the bag can refresh). */
   onPickup?: (baseId: string) => void;
+  /** Called when the server confirms a consumable was used (so the bag refreshes). */
+  onConsumed?: (itemId: string) => void;
+  /** Hands the parent a handle to drive the in-world player (e.g. use a potion). */
+  onControls?: (controls: WorldSceneControls) => void;
+}
+
+export interface WorldSceneControls {
+  /** Send a use-item (consume) request to the channel for the given item. */
+  useItem: (itemId: string) => void;
 }
 
 export interface LocalPlayerStats {
@@ -41,6 +50,8 @@ export interface LocalPlayerStats {
   maxSpirit: number;
   wrath: number;
   maxWrath: number;
+  hp: number;
+  maxHp: number;
 }
 
 export type WorldSceneCleanup = () => void;
@@ -343,8 +354,29 @@ export async function mountWorldScene(
         requestedPickups.delete(msg.itemId);
         opts.onPickup?.(msg.baseId);
         break;
+      case 'consumed': {
+        // Heal feedback floats green over the local player; hp updates via snapshot.
+        opts.onConsumed?.(msg.itemId);
+        const me = lastFrame.players.find((p) => p.id === myId);
+        if (me) {
+          const at = tileToFx(me.pos);
+          fx.spawnFloat(at.x, at.y - 30, `+${msg.heal}`, '#5ad17a', false);
+        }
+        break;
+      }
       case 'damage': {
         const ev = msg.event;
+        // A mob biting the player targets a player id (not a mob). Float the hit
+        // over the player's sprite and skip the cast/projectile FX.
+        if (ev.skillId === 'mob-contact') {
+          const victim = lastFrame.players.find((p) => p.id === ev.targetId);
+          if (victim) {
+            const at = tileToFx(victim.pos);
+            fx.spawnFloat(at.x, at.y - 24, `-${ev.amount}`, '#ff5a5a', true);
+            if (ev.targetId === myId) shakeT = Math.max(shakeT, ev.fatal ? 0.4 : 0.12);
+          }
+          break;
+        }
         const target = lastMobPos.get(ev.targetId);
         if (!target) break;
         const to = tileToFx(target);
@@ -370,6 +402,12 @@ export async function mountWorldScene(
         break;
     }
   }
+
+  // Hand the parent a control surface for in-world actions driven from UI panels
+  // (the inventory's "Use" button sends a consume request over the channel).
+  opts.onControls?.({
+    useItem: (itemId: string) => client.send({ type: 'use-item', itemId }),
+  });
 
   const unsubMsg = client.onMessage(handleServerMessage);
   const unsubStatus = client.onStatusChange((s) => {
@@ -495,6 +533,21 @@ export async function mountWorldScene(
     const dt = ticker.deltaMS / 1000;
     const frame = interp.interpolate(dt);
     lastFrame = frame;
+
+    // Push the local player's live stats to the HUD (Spirit/Wrath/HP orbs).
+    if (myId) {
+      const meP = frame.players.find((p) => p.id === myId);
+      if (meP) {
+        opts.onStats?.({
+          spirit: meP.spirit,
+          maxSpirit: meP.maxSpirit,
+          wrath: meP.wrath,
+          maxWrath: meP.maxWrath,
+          hp: meP.hp,
+          maxHp: meP.maxHp,
+        });
+      }
+    }
 
     // Players
     const seenP = new Set<string>();
