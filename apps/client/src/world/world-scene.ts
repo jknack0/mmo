@@ -146,6 +146,58 @@ export async function mountWorldScene(
     fxs.push({ g, life: max, max, kind });
   }
 
+  // Impact = burst + damage number at the target.
+  function impact(targetTile: Vec2, fatal: boolean, amount: number): void {
+    spawnFireBurst(targetTile, fatal ? 'kill' : 'hit');
+    spawnFloater(targetTile, fatal ? 'KILL' : `-${amount}`, fatal ? 0xff5555 : 0xffcc66, fatal);
+  }
+
+  // ─── Fire projectiles (caster → target) ───────────────────────
+  interface Proj {
+    g: Graphics;
+    from: Vec2; // screen px
+    to: Vec2; // screen px
+    t: number;
+    dur: number;
+    targetTile: Vec2;
+    fatal: boolean;
+    amount: number;
+  }
+  const projs: Proj[] = [];
+
+  function spawnProjectile(fromTile: Vec2, targetTile: Vec2, fatal: boolean, amount: number): void {
+    const g = new Graphics();
+    fxLayer.addChild(g);
+    const fs = tileToScreen(fromTile);
+    const ts = tileToScreen(targetTile);
+    projs.push({
+      g,
+      from: { x: fs.x, y: fs.y - 22 }, // leave from the caster's hand height
+      to: { x: ts.x, y: ts.y - 12 },
+      t: 0,
+      dur: 0.26,
+      targetTile,
+      fatal,
+      amount,
+    });
+  }
+
+  function drawBolt(g: Graphics, x: number, y: number, dx: number, dy: number): void {
+    g.clear();
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    // Soft ember glow halo so the bolt reads in motion.
+    g.circle(x, y, 9).fill({ color: 0xff9f1a, alpha: 0.22 });
+    g.circle(x, y, 6).fill({ color: 0xff6a3a, alpha: 0.32 });
+    // Tapering fire trail: coal → ember → white-hot core.
+    g.rect(x - ux * 16 - 1, y - uy * 16 - 1, 2, 2).fill({ color: 0xb0301a, alpha: 0.7 });
+    g.rect(x - ux * 12 - 1, y - uy * 12 - 1, 3, 3).fill({ color: 0xe0531f });
+    g.rect(x - ux * 7 - 2, y - uy * 7 - 2, 4, 4).fill({ color: 0xff9f1a });
+    g.rect(x - ux * 3 - 3, y - uy * 3 - 3, 6, 6).fill({ color: 0xffd24a });
+    g.rect(x - 3, y - 3, 6, 6).fill({ color: 0xfff1c4 });
+  }
+
   // Deterministic per-tile noise (no flicker between redraws).
   function tileHash(x: number, y: number): number {
     let h = (x * 374761393 + y * 668265263) >>> 0;
@@ -375,15 +427,16 @@ export async function mountWorldScene(
         opts.onPickup?.(msg.baseId);
         break;
       case 'damage': {
-        const pos = lastMobPos.get(msg.event.targetId);
-        if (pos) {
-          spawnFireBurst(pos, msg.event.fatal ? 'kill' : 'hit');
-          spawnFloater(
-            pos,
-            msg.event.fatal ? `KILL` : `-${msg.event.amount}`,
-            msg.event.fatal ? 0xff5555 : 0xffcc66,
-            msg.event.fatal
-          );
+        const target = lastMobPos.get(msg.event.targetId);
+        if (!target) break;
+        // Fly a fire bolt from the attacking player; fall back to an instant
+        // impact for Burn DoT ticks (no caster on screen / self-attributed).
+        const attacker = lastFrame.players.find((p) => p.id === msg.event.attackerId);
+        const far = attacker && Math.hypot(attacker.pos.x - target.x, attacker.pos.y - target.y) > 0.6;
+        if (attacker && far) {
+          spawnProjectile(attacker.pos, target, msg.event.fatal, msg.event.amount);
+        } else {
+          impact(target, msg.event.fatal, msg.event.amount);
         }
         break;
       }
@@ -618,6 +671,21 @@ export async function mountWorldScene(
       if (!seenG.has(id)) {
         groundLayer.removeChild(sprite);
         groundSprites.delete(id);
+      }
+    }
+
+    // Fire projectiles — fly, then impact on arrival.
+    for (let i = projs.length - 1; i >= 0; i--) {
+      const pr = projs[i]!;
+      pr.t += dt;
+      const p = Math.min(1, pr.t / pr.dur);
+      const x = pr.from.x + (pr.to.x - pr.from.x) * p;
+      const y = pr.from.y + (pr.to.y - pr.from.y) * p;
+      drawBolt(pr.g, x, y, pr.to.x - pr.from.x, pr.to.y - pr.from.y);
+      if (p >= 1) {
+        fxLayer.removeChild(pr.g);
+        projs.splice(i, 1);
+        impact(pr.targetTile, pr.fatal, pr.amount);
       }
     }
 
