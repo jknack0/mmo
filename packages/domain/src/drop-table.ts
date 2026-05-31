@@ -151,3 +151,24 @@ export function rollItemDrop(
   const count = affixCountForRarity(rarity, rng());
   return { baseId, affixes: rollAffixes(count, rng) };
 }
+
+/**
+ * A *guaranteed* drop (S20 Rift boss reward): same rarity + affix roll as
+ * rollItemDrop but without the no-drop chance gate. Always returns an item for
+ * a known mob kind. `magicFind` biases rarity upward.
+ */
+export function rollGuaranteedDrop(
+  mobKind: string,
+  rng: () => number,
+  magicFind = 0
+): ItemDrop {
+  const table = DROP_TABLES[mobKind] ?? DROP_TABLES.skeleton!;
+  const rarity = rollRarity(rng(), magicFind);
+  if (rarity === 'gold') {
+    const baseId = UNIQUE_BASE_IDS[Math.floor(rng() * UNIQUE_BASE_IDS.length)]!;
+    return { baseId, affixes: (UNIQUE_AFFIXES[baseId] ?? []).map((a) => ({ ...a })) };
+  }
+  const baseId = table.pool[Math.floor(rng() * table.pool.length)]!;
+  const count = affixCountForRarity(rarity, rng());
+  return { baseId, affixes: rollAffixes(count, rng) };
+}

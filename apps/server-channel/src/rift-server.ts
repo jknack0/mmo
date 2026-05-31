@@ -28,6 +28,7 @@ import {
   createRiftState,
   recordRiftKill,
   riftComplete,
+  riftDeathOutcome,
   aggregateEquipped,
   rollItemDrop,
   rarityOf,
@@ -37,6 +38,7 @@ import {
   RIFT_TRASH,
   RIFT_BOSS,
   RIFT_EXIT_ZONE_ID,
+  MAX_RIFT_DEATHS,
   type RiftState,
 } from '@mmo/domain';
 import {
@@ -87,6 +89,7 @@ interface Connection {
   ws: WebSocket;
   playerId: string | null;
   characterId: string | null;
+  accountId: string | null;
   instanceId: string | null;
 }
 
@@ -97,6 +100,8 @@ export interface RiftInstance {
   bossId: string | null;
   members: Set<Connection>;
   mobCounter: number;
+  /** Party-wide death tally toward the cap (S20). */
+  deaths: number;
   done: boolean;
 }
 
@@ -154,7 +159,7 @@ export function buildRiftServer(opts: RiftServerOptions): RiftServer {
 
   function createInstance(id: string): RiftInstance {
     const zone = createZoneState({ size: def.size, tileMap });
-    const inst: RiftInstance = { id, zone, rift: createRiftState(quota), bossId: null, members: new Set(), mobCounter: 0, done: false };
+    const inst: RiftInstance = { id, zone, rift: createRiftState(quota), bossId: null, members: new Set(), mobCounter: 0, deaths: 0, done: false };
     for (let i = 0; i < RIFT_WAVE_SIZE; i++) spawnTrash(inst);
     instances.set(id, inst);
     return inst;
@@ -168,7 +173,48 @@ export function buildRiftServer(opts: RiftServerOptions): RiftServer {
   }
 
   function sendRiftStatus(inst: RiftInstance): void {
-    broadcastInstance(inst, { type: 'rift-status', phase: inst.rift.phase, kills: inst.rift.kills, quota: inst.rift.quota });
+    broadcastInstance(inst, {
+      type: 'rift-status',
+      phase: inst.rift.phase,
+      kills: inst.rift.kills,
+      quota: inst.rift.quota,
+      deaths: inst.deaths,
+      maxDeaths: MAX_RIFT_DEATHS,
+    });
+  }
+
+  function reviveInRift(inst: RiftInstance, playerId: string): void {
+    const p = inst.zone.players.get(playerId);
+    if (!p) return;
+    p.hp = p.maxHp;
+    p.dead = false;
+    p.target = null;
+    p.attackState = { kind: 'idle' };
+    p.pos = { x: Math.floor(def.size.x / 2), y: def.size.y - 3 }; // back to the entrance
+  }
+
+  /** A party-wide death: bank it, then revive in-place or fail the run at the cap. */
+  function onPlayerDeath(inst: RiftInstance, playerId: string): void {
+    if (inst.done) return;
+    inst.deaths += 1;
+    if (riftDeathOutcome(inst.deaths) === 'fail') {
+      inst.done = true; // run failed: wave materials kept, no boss reward
+      sendRiftStatus(inst);
+      broadcastInstance(inst, { type: 'zone-transition', zoneId: RIFT_EXIT_ZONE_ID });
+    } else {
+      reviveInRift(inst, playerId);
+      sendRiftStatus(inst);
+    }
+  }
+
+  function grantRewards(inst: RiftInstance): void {
+    if (!itemRepo) return;
+    for (const conn of inst.members) {
+      if (!conn.characterId) continue;
+      itemRepo
+        .grantRiftReward(conn.characterId, conn.accountId)
+        .catch((err) => console.error('[rift] reward grant failed:', err));
+    }
   }
 
   function spawnBoss(inst: RiftInstance): void {
@@ -197,6 +243,7 @@ export function buildRiftServer(opts: RiftServerOptions): RiftServer {
       }
       if (riftComplete(inst.rift)) {
         inst.done = true;
+        grantRewards(inst); // guaranteed boss reward, one per member (S20)
         broadcastInstance(inst, { type: 'zone-transition', zoneId: RIFT_EXIT_ZONE_ID });
       }
       sendRiftStatus(inst);
@@ -241,6 +288,7 @@ export function buildRiftServer(opts: RiftServerOptions): RiftServer {
     const playerId = randomUUID();
     conn.playerId = playerId;
     conn.characterId = msg.characterId;
+    conn.accountId = session.accountId;
     conn.instanceId = inst.id;
     inst.members.add(conn);
 
@@ -327,6 +375,7 @@ export function buildRiftServer(opts: RiftServerOptions): RiftServer {
         type: 'damage',
         event: { targetId: hit.playerId, attackerId: hit.mobId, amount: hit.amount, fatal: hit.fatal, skillId: 'mob-contact' },
       });
+      if (hit.fatal) onPlayerDeath(inst, hit.playerId); // S20: death cap / revive
     }
     // Remove dead mobs + keep the wave topped up until the quota.
     for (const [id, m] of inst.zone.mobs) if (!m.alive) inst.zone.mobs.delete(id);
@@ -356,7 +405,7 @@ export function buildRiftServer(opts: RiftServerOptions): RiftServer {
         });
         wss.on('error', reject);
         wss.on('connection', (ws) => {
-          const conn: Connection = { ws, playerId: null, characterId: null, instanceId: null };
+          const conn: Connection = { ws, playerId: null, characterId: null, accountId: null, instanceId: null };
           connections.set(ws, conn);
           ws.on('message', (data) => {
             handleMessage(ws, conn, data.toString()).catch((err) => console.error('[rift] handler error:', err));

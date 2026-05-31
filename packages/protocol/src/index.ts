@@ -115,7 +115,7 @@ export type ServerMessage =
       portals: WorldPortal[];
     }
   | { type: 'zone-transition'; zoneId: string }
-  | { type: 'rift-status'; phase: string; kills: number; quota: number }
+  | { type: 'rift-status'; phase: string; kills: number; quota: number; deaths: number; maxDeaths: number }
   | { type: 'snapshot'; snapshot: ZoneSnapshot }
   | { type: 'damage'; event: DamageEvent }
   | { type: 'picked-up'; itemId: EntityId; baseId: string }
@@ -227,7 +227,14 @@ export function decodeServerMessage(raw: string): ServerMessage {
       ) {
         throw new Error('protocol: malformed rift-status');
       }
-      return { type: 'rift-status', phase: parsed.phase, kills: parsed.kills, quota: parsed.quota };
+      return {
+        type: 'rift-status',
+        phase: parsed.phase,
+        kills: parsed.kills,
+        quota: parsed.quota,
+        deaths: typeof parsed.deaths === 'number' ? parsed.deaths : 0,
+        maxDeaths: typeof parsed.maxDeaths === 'number' ? parsed.maxDeaths : 0,
+      };
     case 'snapshot': {
       if (typeof parsed.snapshot !== 'object' || parsed.snapshot === null) {
         throw new Error('protocol: malformed snapshot');

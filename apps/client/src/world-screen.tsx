@@ -170,6 +170,9 @@ export function WorldScreen(props: WorldScreenProps) {
           >
             <div class="ts-zone-name" style={{ 'font-size': '15px', color: '#ff4d4d' }}>⚔ MINI-BOSS — SLAY THE SKELETON LORD</div>
           </Show>
+          <div class="ts-zone-sub mt-1" style={{ color: rift()!.deaths >= rift()!.maxDeaths - 1 ? '#ff6a6a' : '#c9a98c' }}>
+            lives {Math.max(0, rift()!.maxDeaths - rift()!.deaths)}/{rift()!.maxDeaths}
+          </div>
         </div>
       </Show>
 

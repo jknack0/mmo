@@ -24,8 +24,9 @@ describe('ChannelItemRepo.consume (S16)', () => {
   });
 
   beforeEach(async () => {
-    await sql`DELETE FROM audit_log`.execute(db);
-    await sql`DELETE FROM accounts`.execute(db); // cascades to characters + items + inventory
+    // Scope cleanup to our own account so we don't race parallel Postgres suites
+    // on the shared mmo_test DB (cascades to this account's items/inventory/audit).
+    await sql`DELETE FROM accounts WHERE email = 'drink@example.com'`.execute(db);
     const acct = await sql<{ id: string }>`
       INSERT INTO accounts (email, password_hash) VALUES ('drink@example.com', 'x') RETURNING id
     `.execute(db);
@@ -44,7 +45,8 @@ describe('ChannelItemRepo.consume (S16)', () => {
 
   const auditRows = () =>
     db.selectFrom('audit_log').selectAll().where('character_id', '=', characterId).execute();
-  const itemRows = () => db.selectFrom('items').selectAll().execute();
+  const itemRows = () =>
+    db.selectFrom('items').selectAll().where('owner_character_id', '=', characterId).execute();
   const invRows = () =>
     db.selectFrom('inventory').selectAll().where('character_id', '=', characterId).execute();
 

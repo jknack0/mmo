@@ -36,9 +36,16 @@ export interface EquippedTable {
   item_id: string;
 }
 
+/** Minimal characters view the channel touches (S20 Rift reward materials). */
+export interface CharactersTable {
+  id: Generated<string>;
+  materials: Generated<number>;
+}
+
 export interface ChannelDatabase {
   items: ItemsTable;
   inventory: InventoryTable;
   equipped: EquippedTable;
   audit_log: AuditLogTable;
+  characters: CharactersTable;
 }
