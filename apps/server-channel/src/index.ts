@@ -19,6 +19,11 @@ const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0';
 const DATABASE_URL = process.env.DATABASE_URL;
 const CHANNEL_PORT = Number.parseInt(process.env.CHANNEL_PORT ?? '8081', 10);
 const ZONE_SIZE = { x: 30, y: 30 };
+// S04 routing identity — this process self-registers into the routing table.
+const ZONE_ID = process.env.ZONE_ID ?? 'ashen-plains';
+const CHANNEL_ID = process.env.CHANNEL_ID ?? 'ashen-plains-ch0';
+const CHANNEL_WS_URL = process.env.CHANNEL_WS_URL ?? `ws://localhost:${CHANNEL_PORT}`;
+const CHANNEL_CAPACITY = Number.parseInt(process.env.CHANNEL_CAPACITY ?? '50', 10);
 
 // Alpha test zone: open grid with a couple of decorative blockers so the
 // tile-collision system actually has something to enforce.
@@ -45,6 +50,10 @@ async function main(): Promise<void> {
   const server = buildChannelServer({
     redis,
     db,
+    zoneId: ZONE_ID,
+    channelId: CHANNEL_ID,
+    processUrl: CHANNEL_WS_URL,
+    capacity: CHANNEL_CAPACITY,
     zone: { size: ZONE_SIZE, tileMap: buildTestTileMap(ZONE_SIZE) },
     mobs: [
       { id: 'skel-1', kind: 'skeleton', pos: { x: 15, y: 8 }, maxHp: 60 },

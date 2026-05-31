@@ -34,6 +34,7 @@ import { stepResources } from './resources/resource-system.js';
 import { loadTripods } from './persistence/tripod-store.js';
 import { loadPassives } from './persistence/passive-store.js';
 import { createChannelItemRepo, type ChannelItemRepo } from './persistence/item-repo.js';
+import { heartbeatChannel, deregisterChannel, type ChannelIdentity } from './persistence/channel-registry.js';
 import type { ChannelDatabase } from './db/types.js';
 
 interface Connection {
@@ -52,6 +53,17 @@ export interface ChannelServerOptions {
   zone: { size: Vec2; tileMap: number[][] };
   mobs?: MobSpawnInput[];
   tickHz?: number;
+  // ─── Channel routing (S04 #6, ADR-0011) ───
+  /** Zone this channel serves. Default 'ashen-plains'. */
+  zoneId?: string;
+  /** Routing id. When set, the channel self-registers + heartbeats to Redis. */
+  channelId?: string;
+  /** WS URL clients use to reach this process (what the router hands back). */
+  processUrl?: string;
+  /** Max concurrent players. When set, joins past it are refused. */
+  capacity?: number;
+  /** Heartbeat interval ms (load → routing table). Default 5000. */
+  heartbeatMs?: number;
 }
 
 /** Tiles a player must be within to grab a ground item. */
@@ -92,8 +104,31 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
   const itemRepo: ChannelItemRepo | null = opts.db ? createChannelItemRepo(opts.db) : null;
   const connections = new Map<WebSocket, Connection>();
 
+  // Routing self-registration is enabled only when a channelId is configured
+  // (the standalone test servers omit it and stay off the routing table).
+  const identity: ChannelIdentity | null = opts.channelId
+    ? { zoneId: opts.zoneId ?? 'ashen-plains', channelId: opts.channelId, processUrl: opts.processUrl ?? '' }
+    : null;
+  const heartbeatMs = opts.heartbeatMs ?? 5_000;
+
   let wss: WebSocketServer | null = null;
   let tickHandle: NodeJS.Timeout | null = null;
+  let heartbeatHandle: NodeJS.Timeout | null = null;
+  let stopping = false;
+
+  /** Players currently authenticated on this channel (drives load + capacity). */
+  function authedCount(): number {
+    let n = 0;
+    for (const c of connections.values()) if (c.playerId !== null) n++;
+    return n;
+  }
+
+  function publishHeartbeat(): void {
+    if (!identity || stopping) return;
+    heartbeatChannel(opts.redis, identity, authedCount()).catch((err) =>
+      console.error('[channel] heartbeat failed:', err)
+    );
+  }
 
   async function authenticateHello(
     sessionToken: string
@@ -130,6 +165,13 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         ws.close();
         return;
       }
+      // Capacity enforcement (ADR-0011): refuse the join when full so the
+      // gateway router sends the next player to another channel.
+      if (opts.capacity !== undefined && authedCount() >= opts.capacity) {
+        send(ws, { type: 'error', reason: 'channel-full' });
+        ws.close();
+        return;
+      }
       const playerId = randomUUID();
       conn.playerId = playerId;
       conn.characterId = msg.characterId;
@@ -157,6 +199,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         zoneSize: zone.size,
         tileMap: zone.tileMap,
       });
+      publishHeartbeat(); // load changed → refresh routing immediately
       return;
     }
 
@@ -307,6 +350,12 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       return new Promise((resolve, reject) => {
         wss = new WebSocketServer({ port }, () => {
           tickHandle = setInterval(tick, tickMs);
+          // Self-register + heartbeat into the routing table (S04). Publish
+          // once now so the channel is routable before its first heartbeat.
+          if (identity) {
+            publishHeartbeat();
+            heartbeatHandle = setInterval(publishHeartbeat, heartbeatMs);
+          }
           resolve();
         });
         wss.on('error', reject);
@@ -322,7 +371,10 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
 
           ws.on('close', () => {
             connections.delete(ws);
-            if (conn.playerId) despawnPlayer(zone, conn.playerId);
+            if (conn.playerId) {
+              despawnPlayer(zone, conn.playerId);
+              publishHeartbeat(); // slot freed → refresh routing immediately
+            }
           });
 
           ws.on('error', (err) => {
@@ -334,9 +386,17 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
 
     stop() {
       return new Promise((resolve, reject) => {
+        stopping = true;
         if (tickHandle) {
           clearInterval(tickHandle);
           tickHandle = null;
+        }
+        if (heartbeatHandle) {
+          clearInterval(heartbeatHandle);
+          heartbeatHandle = null;
+        }
+        if (identity) {
+          deregisterChannel(opts.redis, identity).catch(() => {});
         }
         if (!wss) return resolve();
         for (const ws of connections.keys()) ws.terminate();
