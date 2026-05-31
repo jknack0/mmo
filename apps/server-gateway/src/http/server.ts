@@ -26,12 +26,20 @@ import type { VendorService } from '../vendor/vendor-service.js';
 import type { RespawnService } from '../respawn/respawn-service.js';
 import type { AuditRepo } from '../audit/audit-repo.js';
 import type { ChannelRouter } from '../channel-router/channel-router.js';
+import type { QuestRepo } from '../quest/quest-repo.js';
 import {
   getItemBase,
   slotAcceptsBase,
   aggregateEquipped,
   computeDerivedStats,
   VENDOR_CATALOG,
+  validateLearnedEquip,
+  TRAINER_QUESTS,
+  getQuest,
+  initialProgress,
+  startQuest,
+  recordQuestKill,
+  turnInQuest,
 } from '@mmo/domain';
 
 export interface GatewayServerOptions {
@@ -45,6 +53,9 @@ export interface GatewayServerOptions {
   respawn?: RespawnService;
   /** Audit trail (S21). Records high-value allocation events. Optional. */
   audit?: AuditRepo;
+  /** Trainer quests + learned-discipline gate (S12). When present, equip is
+   * gated on the learned set and the quest routes are served. Optional. */
+  quests?: QuestRepo;
   /** ChannelRouter (S04). When present, /connect routes by zone + capacity. */
   router?: ChannelRouter;
   /** Origin the client SPA is served from. Discord callback redirects here. */
@@ -82,6 +93,10 @@ const TAP_PATH = /^\/characters\/([0-9a-f-]{36})\/items\/([0-9a-f-]{36})\/tap$/;
 const VENDOR_BUY_PATH = /^\/characters\/([0-9a-f-]{36})\/vendor\/buy$/;
 const VENDOR_SELL_PATH = /^\/characters\/([0-9a-f-]{36})\/vendor\/sell$/;
 const RESPAWN_PATH = /^\/characters\/([0-9a-f-]{36})\/respawn$/;
+const QUESTS_PATH = /^\/characters\/([0-9a-f-]{36})\/quests$/;
+const QUEST_START_PATH = /^\/characters\/([0-9a-f-]{36})\/quests\/([a-z-]+)\/start$/;
+const QUEST_KILL_PATH = /^\/characters\/([0-9a-f-]{36})\/quests\/([a-z-]+)\/kill$/;
+const QUEST_TURNIN_PATH = /^\/characters\/([0-9a-f-]{36})\/quests\/([a-z-]+)\/turn-in$/;
 
 function setCors(res: ServerResponse, origin: string): void {
   res.setHeader('Access-Control-Allow-Origin', origin);
@@ -111,7 +126,7 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 }
 
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
-  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping, vendor, router, respawn, audit } = opts;
+  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping, vendor, router, respawn, audit, quests } = opts;
 
   // Snapshot the inventory view a vendor trade returns: refreshed carried items,
   // gold, and materials so the client re-renders in one round trip.
@@ -407,6 +422,15 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           sendJson(res, 400, { error: 'invalid-disciplines' });
           return;
         }
+        // S12: gate on the learned set — a player can only equip disciplines
+        // they have unlocked via the trainer quest (Pyromancy is the starter).
+        if (quests) {
+          const learned = await quests.listLearned(characterId);
+          if (!validateLearnedEquip(body.equipped, learned)) {
+            sendJson(res, 403, { error: 'discipline-not-learned' });
+            return;
+          }
+        }
         const paid = await inventory.spendGold(characterId, DISCIPLINE_SWITCH_COST);
         if (!paid) {
           sendJson(res, 400, { error: 'insufficient-gold' });
@@ -422,6 +446,87 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
         });
         sendJson(res, 200, { equipped: body.equipped, gold: await inventory.getGold(characterId) });
         return;
+      }
+
+      // ─── Trainer quests (S12 #14) ─────────────────────────────
+      // GET  /characters/:id/quests             → quest log + learned set
+      // POST /characters/:id/quests/:qid/start  → NotStarted → InProgress
+      // POST /characters/:id/quests/:qid/kill   → count a qualifying kill
+      // POST /characters/:id/quests/:qid/turn-in→ ReadyToTurnIn → Completed (learn)
+      if (quests) {
+        const questsMatch = QUESTS_PATH.exec(url.pathname);
+        if (questsMatch && req.method === 'GET') {
+          const session = await requireAccount(req, res, auth);
+          if (!session) return;
+          const characterId = questsMatch[1]!;
+          if (!(await characters.loadCharacter(session.accountId, characterId))) {
+            sendJson(res, 404, { error: 'character-not-found' });
+            return;
+          }
+          const [progress, learned] = await Promise.all([
+            quests.listProgress(characterId),
+            quests.listLearned(characterId),
+          ]);
+          const byId = new Map(progress.map((p) => [p.questId, p]));
+          const log = TRAINER_QUESTS.map((q) => {
+            const p = byId.get(q.id) ?? initialProgress(q.id);
+            return {
+              id: q.id, name: q.name, trainerId: q.trainerId, discipline: q.discipline,
+              mobKind: q.mobKind, killTarget: q.killTarget, state: p.state, kills: p.kills,
+            };
+          });
+          sendJson(res, 200, { quests: log, learned });
+          return;
+        }
+
+        const startMatch = QUEST_START_PATH.exec(url.pathname);
+        const killMatch = QUEST_KILL_PATH.exec(url.pathname);
+        const turnInMatch = QUEST_TURNIN_PATH.exec(url.pathname);
+        const action = startMatch ? 'start' : killMatch ? 'kill' : turnInMatch ? 'turn-in' : null;
+        const match = startMatch ?? killMatch ?? turnInMatch;
+        if (match && action && req.method === 'POST') {
+          const session = await requireAccount(req, res, auth);
+          if (!session) return;
+          const characterId = match[1]!;
+          const questId = match[2]!;
+          if (!(await characters.loadCharacter(session.accountId, characterId))) {
+            sendJson(res, 404, { error: 'character-not-found' });
+            return;
+          }
+          const quest = getQuest(questId);
+          if (!quest) {
+            sendJson(res, 404, { error: 'quest-not-found' });
+            return;
+          }
+          const progress = await quests.loadProgress(characterId, questId);
+
+          if (action === 'start') {
+            const r = startQuest(progress);
+            if (!r.ok) { sendJson(res, 409, { error: r.error }); return; }
+            await quests.saveProgress(characterId, r.progress);
+            sendJson(res, 200, { state: r.progress.state, kills: r.progress.kills });
+            return;
+          }
+          if (action === 'kill') {
+            const r = recordQuestKill(progress, quest);
+            if (r.changed) await quests.saveProgress(characterId, r.progress);
+            sendJson(res, 200, { state: r.progress.state, kills: r.progress.kills, changed: r.changed });
+            return;
+          }
+          // turn-in
+          const r = turnInQuest(progress, quest);
+          if (!r.ok) { sendJson(res, 409, { error: r.error }); return; }
+          await quests.saveProgress(characterId, r.progress);
+          await quests.learnDiscipline(characterId, r.learned);
+          await audit?.append({
+            action: 'quest-complete',
+            accountId: session.accountId,
+            characterId,
+            detail: { questId, learned: r.learned },
+          });
+          sendJson(res, 200, { state: r.progress.state, learned: r.learned });
+          return;
+        }
       }
 
       // ─── GET /characters/:id/inventory ────────────────────────

@@ -12,6 +12,8 @@ import { PassiveTreePanel } from './passive-tree-panel.js';
 import { InventoryPanel } from './inventory-panel.js';
 import { VendorPanel } from './vendor-panel.js';
 import { DisciplinePanel } from './discipline-panel.js';
+import { QuestPanel } from './quest-panel.js';
+import { fetchQuests, reportQuestKill } from './quests.js';
 
 export interface WorldScreenProps {
   sessionToken: string;
@@ -73,7 +75,19 @@ export function WorldScreen(props: WorldScreenProps) {
   const [showInventory, setShowInventory] = createSignal(false);
   const [showVendor, setShowVendor] = createSignal(false);
   const [showDisc, setShowDisc] = createSignal(false);
+  const [showQuests, setShowQuests] = createSignal(false);
+  const [focusTrainer, setFocusTrainer] = createSignal<string | undefined>(undefined);
   const [pickupKey, setPickupKey] = createSignal(0);
+
+  // Cache of the player's InProgress quests so a mob death can be reported to
+  // the matching quest(s) without re-fetching the whole log per kill (S12).
+  let activeQuests: { id: string; mobKind: string }[] = [];
+  async function refreshActiveQuests(): Promise<void> {
+    const log = await fetchQuests(props.sessionToken, props.character.id);
+    activeQuests = log.quests
+      .filter((q) => q.state === 'InProgress')
+      .map((q) => ({ id: q.id, mobKind: q.mobKind }));
+  }
   const [zoneName, setZoneName] = createSignal('The Sundered Reaches');
   const [dead, setDead] = createSignal(false);
   const [respawning, setRespawning] = createSignal(false);
@@ -120,6 +134,17 @@ export function WorldScreen(props: WorldScreenProps) {
         },
         onDeath: () => setDead(true),
         onRiftStatus: (s) => setRift(s),
+        onTrainerClick: (npcId) => {
+          setFocusTrainer(npcId);
+          setShowQuests(true);
+        },
+        onMobKilled: (kind) => {
+          const matching = activeQuests.filter((q) => q.mobKind === kind);
+          if (matching.length === 0) return;
+          void Promise.all(
+            matching.map((q) => reportQuestKill(props.sessionToken, props.character.id, q.id))
+          ).then(refreshActiveQuests);
+        },
       });
     } catch (e) {
       setError((e as Error).message);
@@ -143,7 +168,10 @@ export function WorldScreen(props: WorldScreenProps) {
     }
   }
 
-  onMount(() => void mountZone());
+  onMount(() => {
+    void mountZone();
+    void refreshActiveQuests();
+  });
 
   onCleanup(() => {
     cleanup?.();
@@ -223,6 +251,13 @@ export function WorldScreen(props: WorldScreenProps) {
         <button
           type="button"
           class="ts-btn"
+          onClick={() => { setFocusTrainer(undefined); setShowQuests(true); }}
+        >
+          Trainers
+        </button>
+        <button
+          type="button"
+          class="ts-btn"
           onClick={() => setShowInventory(true)}
         >
           Inventory
@@ -281,6 +316,16 @@ export function WorldScreen(props: WorldScreenProps) {
           token={props.sessionToken}
           characterId={props.character.id}
           onClose={() => setShowDisc(false)}
+        />
+      </Show>
+
+      <Show when={showQuests()}>
+        <QuestPanel
+          token={props.sessionToken}
+          characterId={props.character.id}
+          focusTrainerId={focusTrainer()}
+          onChanged={() => void refreshActiveQuests()}
+          onClose={() => { setShowQuests(false); void refreshActiveQuests(); }}
         />
       </Show>
 

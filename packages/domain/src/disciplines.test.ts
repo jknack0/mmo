@@ -6,6 +6,7 @@ import {
   allSkillIds,
   skillsForDisciplines,
   validateEquippedDisciplines,
+  validateLearnedEquip,
   validateHotbar,
   MAX_EQUIPPED_DISCIPLINES,
   HOTBAR_SIZE,
@@ -61,5 +62,19 @@ describe('validateHotbar (free-pick across equipped disciplines)', () => {
   it('skillsForDisciplines unions the pools', () => {
     expect(skillsForDisciplines([BLADEMASTER])).toContain('slash');
     expect(skillsForDisciplines([BLADEMASTER])).not.toContain('spark');
+  });
+});
+
+describe('validateLearnedEquip (S12 trainer-quest gate)', () => {
+  it('allows equipping only learned disciplines', () => {
+    expect(validateLearnedEquip([PYROMANCY], [PYROMANCY])).toBe(true);
+    expect(validateLearnedEquip([PYROMANCY, BLADEMASTER], [PYROMANCY, BLADEMASTER])).toBe(true);
+    expect(validateLearnedEquip([], [PYROMANCY])).toBe(true);
+  });
+
+  it('rejects equipping a discipline the player has not learned', () => {
+    expect(validateLearnedEquip([BLADEMASTER], [PYROMANCY])).toBe(false);
+    expect(validateLearnedEquip([PYROMANCY, BLADEMASTER], [PYROMANCY])).toBe(false);
+    expect(validateLearnedEquip([PYROMANCY], [])).toBe(false);
   });
 });

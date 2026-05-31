@@ -53,6 +53,22 @@ export interface EquippedTable {
   item_id: string;
 }
 
+/** Disciplines a character has unlocked via trainer quests (S12). */
+export interface DisciplinesLearnedTable {
+  character_id: string;
+  discipline_id: string;
+  learned_at: Generated<Date>;
+}
+
+/** Persisted trainer-quest FSM state (S12). Absence of a row = NotStarted. */
+export interface CharacterQuestsTable {
+  character_id: string;
+  quest_id: string;
+  state: string;
+  kills: Generated<number>;
+  updated_at: Generated<Date>;
+}
+
 export interface Database {
   accounts: AccountsTable;
   characters: CharactersTable;
@@ -60,4 +76,6 @@ export interface Database {
   inventory: InventoryTable;
   equipped: EquippedTable;
   audit_log: AuditLogTable;
+  disciplines_learned: DisciplinesLearnedTable;
+  character_quests: CharacterQuestsTable;
 }

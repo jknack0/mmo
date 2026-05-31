@@ -73,6 +73,17 @@ export function validateEquippedDisciplines(ids: unknown): ids is string[] {
 }
 
 /**
+ * Learned-equip gate (S12 #14): a player may only equip disciplines they have
+ * unlocked via the trainer quest. `learned` is the character's `disciplines_learned`
+ * set. Returns false if any equipped id is not yet learned. Combine with
+ * `validateEquippedDisciplines` for shape + the learned check for entitlement.
+ */
+export function validateLearnedEquip(equipped: string[], learned: string[]): boolean {
+  const known = new Set(learned);
+  return equipped.every((id) => known.has(id));
+}
+
+/**
  * A valid hotbar is ≤HOTBAR_SIZE distinct skills, each drawn from the equipped
  * disciplines' pools (free distribution across the two disciplines).
  */
