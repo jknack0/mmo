@@ -17,6 +17,7 @@ import {
 import type { InventoryRepo } from '../inventory/inventory-repo.js';
 import type { TappingService } from '../tapping/tapping-service.js';
 import type { VendorService } from '../vendor/vendor-service.js';
+import type { ChannelRouter } from '../channel-router/channel-router.js';
 import {
   getItemBase,
   slotAcceptsBase,
@@ -32,11 +33,16 @@ export interface GatewayServerOptions {
   inventory: InventoryRepo;
   tapping: TappingService;
   vendor: VendorService;
+  /** ChannelRouter (S04). When present, /connect routes by zone + capacity. */
+  router?: ChannelRouter;
   /** Origin the client SPA is served from. Discord callback redirects here. */
   clientOrigin: string;
-  /** WS URL of the single hardcoded channel (until S04 wires ChannelRouter). */
+  /** Legacy single-channel WS URL — fallback when no router is configured. */
   channelWsUrl: string;
 }
+
+/** Open-world starter zone a /connect defaults to when none is requested. */
+const DEFAULT_ZONE_ID = 'ashen-plains';
 
 const AUTH_ERROR_STATUS: Record<AuthError, number> = {
   'invalid-credentials': 401,
@@ -91,7 +97,7 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 }
 
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
-  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping, vendor } = opts;
+  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping, vendor, router } = opts;
 
   // Snapshot the inventory view a vendor trade returns: refreshed carried items,
   // gold, and materials so the client re-renders in one round trip.
@@ -237,7 +243,11 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
       if (req.method === 'POST' && url.pathname === '/connect') {
         const session = await requireAccount(req, res, auth);
         if (!session) return;
-        const body = await readJsonBody<{ characterId?: string }>(req);
+        const body = await readJsonBody<{
+          characterId?: string;
+          zoneId?: string;
+          channelId?: string;
+        }>(req);
         if (!body.characterId) {
           sendJson(res, 400, { error: 'missing-fields' });
           return;
@@ -250,10 +260,34 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           sendJson(res, 404, { error: 'character-not-found' });
           return;
         }
+        const characterInfo = { id: character.id, name: character.name };
+
+        // S04: route by zone + capacity through the ChannelRouter. `channelId`
+        // in the body is a manual channel-switch request (preferred channel).
+        if (router) {
+          const zoneId = body.zoneId ?? DEFAULT_ZONE_ID;
+          const route = await router.routeToChannel(zoneId, session.accountId, {
+            preferred: body.channelId,
+          });
+          if ('error' in route) {
+            const status = route.error === 'preferred-full' ? 409 : 503;
+            sendJson(res, status, { error: route.error });
+            return;
+          }
+          sendJson(res, 200, {
+            wsUrl: route.wsUrl,
+            channelId: route.channelId,
+            zoneId,
+            character: characterInfo,
+          });
+          return;
+        }
+
+        // Legacy fallback: single hardcoded channel.
         sendJson(res, 200, {
           wsUrl: channelWsUrl,
           channelId: 'alpha-test-zone-ch0',
-          character: { id: character.id, name: character.name },
+          character: characterInfo,
         });
         return;
       }

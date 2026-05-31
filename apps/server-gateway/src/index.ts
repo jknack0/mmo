@@ -14,6 +14,7 @@ import { createCharacterService } from './character/character-service.js';
 import { createInventoryRepo } from './inventory/inventory-repo.js';
 import { createTappingService } from './tapping/tapping-service.js';
 import { createVendorService } from './vendor/vendor-service.js';
+import { createChannelRouter } from './channel-router/channel-router.js';
 import { buildGatewayServer } from './http/server.js';
 
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
@@ -44,6 +45,10 @@ async function main(): Promise<void> {
   const inventory = createInventoryRepo(db);
   const tapping = createTappingService(db);
   const vendor = createVendorService(db);
+  // S04: route connections by zone + capacity. No spawner at alpha — the single
+  // channel process self-registers; a full zone returns 503 (real process
+  // spawning lands when scale demands it, per ADR-0011).
+  const router = createChannelRouter(redis);
 
   const server = buildGatewayServer({
     auth,
@@ -52,6 +57,7 @@ async function main(): Promise<void> {
     inventory,
     tapping,
     vendor,
+    router,
     clientOrigin: CLIENT_ORIGIN,
     channelWsUrl: CHANNEL_WS_URL,
   });
