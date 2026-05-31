@@ -45,6 +45,10 @@ export interface MountWorldSceneOptions {
   onDeath?: () => void;
   /** Rift phase/progress update (S19/S20), for the objective banner. */
   onRiftStatus?: (s: { phase: string; kills: number; quota: number; deaths: number; maxDeaths: number }) => void;
+  /** A trainer NPC was clicked (S12) — the parent opens the quest dialog. */
+  onTrainerClick?: (npcId: string) => void;
+  /** A mob just died this frame (S12) — drives trainer-quest kill progress. */
+  onMobKilled?: (kind: string) => void;
 }
 
 export interface WorldSceneControls {
@@ -236,7 +240,7 @@ export async function mountWorldScene(
     return c;
   }
 
-  function drawDecor(npcsList: { kind: string; pos: Vec2; label: string }[], portalsList: { pos: Vec2; label: string }[]): void {
+  function drawDecor(npcsList: { id: string; kind: string; pos: Vec2; label: string }[], portalsList: { pos: Vec2; label: string }[]): void {
     decorLayer.removeChildren();
     for (const p of portalsList) {
       const m = decorMarker('portal', p.label);
@@ -258,6 +262,17 @@ export async function mountWorldScene(
         m.on('pointerdown', (e) => {
           e.stopPropagation();
           opts.onZoneTransition?.(RIFT_T1);
+        });
+      }
+      // Trainer NPCs are interactive — click to open the learn-discipline quest (S12).
+      if (n.kind === 'trainer') {
+        const npcId = n.id;
+        m.eventMode = 'static';
+        m.cursor = 'pointer';
+        m.hitArea = new Rectangle(-24, -24, 48, 48);
+        m.on('pointerdown', (e) => {
+          e.stopPropagation();
+          opts.onTrainerClick?.(npcId);
         });
       }
       decorLayer.addChild(m);
@@ -331,6 +346,8 @@ export async function mountWorldScene(
   // so damage floaters can spawn at the mob's last seen position even
   // after a fatal hit collapses the entry on the next snapshot.
   const lastMobPos = new Map<string, Vec2>();
+  // mobId → last-known alive flag, to fire onMobKilled once on alive→dead (S12).
+  const mobWasAlive = new Map<string, boolean>();
 
   function makePlayerSprite(name: string, isMe: boolean): PlayerSpriteEntry {
     const container = new Container();
@@ -666,6 +683,9 @@ export async function mountWorldScene(
     for (const m of frame.mobs) {
       seenM.add(m.id);
       lastMobPos.set(m.id, { x: m.pos.x, y: m.pos.y });
+      // Detect the alive→dead transition once, to drive quest kill progress (S12).
+      if (mobWasAlive.get(m.id) === true && !m.alive) opts.onMobKilled?.(m.kind);
+      mobWasAlive.set(m.id, m.alive);
       if (m.alive) aliveMobsByTile.set(m.id, m);
       let entry = mobSprites.get(m.id);
       if (!entry) {
@@ -688,6 +708,7 @@ export async function mountWorldScene(
         entityLayer.removeChild(entry.container);
         mobSprites.delete(id);
         lastMobPos.delete(id);
+        mobWasAlive.delete(id);
       }
     }
 

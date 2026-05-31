@@ -16,6 +16,7 @@ import { createTappingService } from './tapping/tapping-service.js';
 import { createVendorService } from './vendor/vendor-service.js';
 import { createRespawnService } from './respawn/respawn-service.js';
 import { createAuditRepo } from './audit/audit-repo.js';
+import { createQuestRepo } from './quest/quest-repo.js';
 import { createChannelRouter } from './channel-router/channel-router.js';
 import { buildGatewayServer } from './http/server.js';
 
@@ -49,6 +50,7 @@ async function main(): Promise<void> {
   const vendor = createVendorService(db);
   const respawn = createRespawnService(db);
   const audit = createAuditRepo(db);
+  const quests = createQuestRepo(db);
   // S04: route connections by zone + capacity. No spawner at alpha — the single
   // channel process self-registers; a full zone returns 503 (real process
   // spawning lands when scale demands it, per ADR-0011).
@@ -63,6 +65,7 @@ async function main(): Promise<void> {
     vendor,
     respawn,
     audit,
+    quests,
     router,
     clientOrigin: CLIENT_ORIGIN,
     channelWsUrl: CHANNEL_WS_URL,

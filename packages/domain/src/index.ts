@@ -27,3 +27,5 @@ export * from './respawn.js';
 export * from './rift.js';
 // S11 (#13): disciplines + 2-discipline mixing.
 export * from './disciplines.js';
+// S12 (#14): trainer learn-discipline quests + learned-equip gate.
+export * from './quests.js';
