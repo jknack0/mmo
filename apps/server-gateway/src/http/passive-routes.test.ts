@@ -13,6 +13,7 @@ import { createAuthService } from '../auth/auth-service.js';
 import type { DiscordClient } from '../auth/types.js';
 import { createCharacterRepo } from '../character/character-repo.js';
 import { createCharacterService } from '../character/character-service.js';
+import { createAuditRepo } from '../audit/audit-repo.js';
 import { buildGatewayServer } from './server.js';
 
 const stubDiscord: DiscordClient = {
@@ -45,6 +46,7 @@ describe('GET/PUT /characters/:id/passives', () => {
       auth,
       characters,
       redis,
+      audit: createAuditRepo(db),
       clientOrigin: 'http://localhost:5173',
       channelWsUrl: 'ws://channel.test:8081',
     });
@@ -106,6 +108,22 @@ describe('GET/PUT /characters/:id/passives', () => {
     });
     const body = (await get.json()) as { allocation: typeof allocation };
     expect(body.allocation).toEqual(allocation);
+  });
+
+  it('PUT writes a passive-alloc audit row (S21 high-value event)', async () => {
+    const { token, characterId } = await setup('audit-pa@example.com');
+    await fetch(`${url}/characters/${characterId}/passives`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ allocation: { 'embered-soul': 1, 'inner-furnace': 1 } }),
+    });
+    const rows = await db
+      .selectFrom('audit_log')
+      .selectAll()
+      .where('character_id', '=', characterId)
+      .where('action', '=', 'passive-alloc')
+      .execute();
+    expect(rows).toHaveLength(1);
   });
 
   it('PUT rejects an allocation that violates prerequisite gating', async () => {

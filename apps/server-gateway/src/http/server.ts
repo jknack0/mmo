@@ -18,6 +18,7 @@ import type { InventoryRepo } from '../inventory/inventory-repo.js';
 import type { TappingService } from '../tapping/tapping-service.js';
 import type { VendorService } from '../vendor/vendor-service.js';
 import type { RespawnService } from '../respawn/respawn-service.js';
+import type { AuditRepo } from '../audit/audit-repo.js';
 import type { ChannelRouter } from '../channel-router/channel-router.js';
 import {
   getItemBase,
@@ -36,6 +37,8 @@ export interface GatewayServerOptions {
   vendor: VendorService;
   /** Respawn economy (S18). Optional so legacy test harnesses can omit it. */
   respawn?: RespawnService;
+  /** Audit trail (S21). Records high-value allocation events. Optional. */
+  audit?: AuditRepo;
   /** ChannelRouter (S04). When present, /connect routes by zone + capacity. */
   router?: ChannelRouter;
   /** Origin the client SPA is served from. Discord callback redirects here. */
@@ -101,7 +104,7 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 }
 
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
-  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping, vendor, router, respawn } = opts;
+  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping, vendor, router, respawn, audit } = opts;
 
   // Snapshot the inventory view a vendor trade returns: refreshed carried items,
   // gold, and materials so the client re-renders in one round trip.
@@ -336,6 +339,7 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           return;
         }
         await saveTripods(redis, characterId, body.loadout);
+        await audit?.append({ action: 'tripod-set', accountId: session.accountId, characterId });
         sendJson(res, 200, { loadout: body.loadout });
         return;
       }
@@ -364,6 +368,12 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           return;
         }
         await savePassives(redis, characterId, body.allocation);
+        await audit?.append({
+          action: 'passive-alloc',
+          accountId: session.accountId,
+          characterId,
+          detail: { points: Object.values(body.allocation as Record<string, number>).reduce((a, b) => a + b, 0) },
+        });
         sendJson(res, 200, { allocation: body.allocation });
         return;
       }
