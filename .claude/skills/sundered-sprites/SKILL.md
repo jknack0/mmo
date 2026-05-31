@@ -29,8 +29,9 @@ can't drift from the design system. If a value isn't in the repo, ask rather tha
 
 ## Non-negotiable rules (these define "on-style")
 1. **Pixel-perfect:** square corners, `image-rendering: pixelated`, **integer scale only**, **NEAREST** filtering, hard 2px bevels — never any blur.
-2. **Authoring res:** 1 texel = 1 art pixel. Transparent PNG horizontal strips at native cell size.
+2. **Authoring res:** 1 texel = 1 art pixel. Transparent PNG at native cell size.
 3. **8-direction order is always** `[e, se, s, sw, w, nw, n, ne]`; `sw/w/nw` are horizontal mirrors of `se/e/ne`.
+3a. **Actors animate.** Every walking actor (player, mob, boss, NPC) ships as a **clip sheet**: the three states **idle / move / attack**, each an 8-facing block of rows, frames across columns. Defaults: idle 2f@3fps, move 4f@8fps, attack 4f@12fps. Author 5 views (`e se s n ne`) and mirror to `w sw nw`. The engine selects the clip+facing+frame at runtime (`clipFrameIndex`); you just lay out the grid. Static or single-facing loops are only for non-actors (fx, props) or front-only flyers.
 4. **Iso:** tile 64×32; `screen = ((tx−ty)*32, (tx+ty)*16)`; actor anchor bottom-centre `[0.5, ~0.95]`.
 5. **Palette discipline:** only token colours. **Rarity colours are globally constant — never zone-tinted.** `--void` is background only, never an asset fill.
 6. **PNG vs procedural:** loot beacons, fire VFX, burn flames, and terrain are drawn in-engine (Pixi) so they tint/animate — deliver these as **code/recipes, not static PNGs**.
@@ -45,15 +46,21 @@ Pick before drawing:
 State which method you chose and why in one line, then proceed.
 
 ## Step 2 — Generate with the toolkit
-For code sprites, write a small generator that imports `spritekit` and follow `scripts/cinderbat.py`
-as the canonical pattern: build each frame on a `Grid`, draw with the primitives, mirror symmetric
-halves, apply a hard `outline`, then `save_strip` / `save_preview` / `save_gif`. Keep designs readable
-at native size (silhouette first), use the `roles()` art-colours or pick tokens directly, and respect
-the light source (default top-left).
+For code sprites, write a small generator that imports `spritekit`. Pick the pattern by asset type:
+- **Animated actor (idle/move/attack × 8-dir)** → follow `scripts/skeleton.py`. Compose the body from
+  parametric parts (skull/torso/arms/legs) driven by a walk `stride` + `swing` + vertical `bob`, so all
+  frames of a facing fall out of one `pose()` call. Author 5 views, mirror the rest, assemble rows with
+  `save_sheet(rows, path)` (rows = idle block then move/attack block, each 8 facings; columns = frames).
+  Re-skins of an actor are a `recolor()` of the sheet — animation carries for free (`scripts/ghoul.py`).
+- **Single-facing loop or static prop** → follow `scripts/cinderbat.py`: build frames on a `Grid`, mirror
+  symmetric halves, hard `outline`, then `save_strip` / `save_preview` / `save_gif`.
+
+Keep designs readable at native size (silhouette first), use `roles()` art-colours or pick tokens
+directly, and respect the light source (default top-left).
 
 `spritekit` gives you: `load_palette()` / `roles()`, a `Grid` with `disc / line / poly / mirror_x / outline`,
-`rot()`, `save_strip / save_preview / save_gif`, `recolor()` for variant batches, and
-`manifest_entry()` + `upsert_manifest()`.
+`rot()`, `DIR_FRAMES`, `save_strip / save_sheet / save_preview / save_gif`, `recolor()` for variant batches,
+and `manifest_entry()` / `clip_manifest_entry()` + `upsert_manifest()`.
 
 ## Step 3 — Always validate visually
 Open the generated `*_preview.png` and check: does the silhouette read at native size? On-grid, no
@@ -64,8 +71,10 @@ right — never ship the first pass unseen.
 - Save the native transparent strip into the assets folder using the naming convention:
   prefix (`env_ npc_ mob_ hero_ boss_ item_ icon_ fx_ ui_`), snake_case, with a facing/animation
   suffix (`_8dir`, `_s`, `_fly`, etc.). Example: `mob_cinderbat_fly_s.png`.
-- Add the manifest entry via `upsert_manifest()` (cols, rows, cellW, cellH, frames, anchor, renderScale,
-  fps for animations, and a short note).
+- Add the manifest entry via `upsert_manifest()`. For an **animated actor**, use `clip_manifest_entry(cellW, cellH, anchor, clips, …)`
+  where `clips = {"idle": {"frames", "fps"}, "move": {...}, "attack": {...}}` — it computes `cols/rows/row` so the
+  block layout matches the engine's `clipFrameIndex`. For static/loop sheets use `manifest_entry()` (cols, rows,
+  cellW, cellH, frames, anchor, renderScale, `fps` for loops, a short note).
 - The `*_preview.png` / `*.gif` are for human review only — they do not ship.
 
 ## Variants in bulk ("hella assets")

@@ -30,8 +30,8 @@
       "note": "player Pyromancer. Orb hidden on n/ne/nw facings (drawn separately as a glow in-engine)."
     },
     "mob_skeleton_base.png": {
-      "cols": 8,
-      "rows": 1,
+      "cols": 4,
+      "rows": 16,
       "cellW": 16,
       "cellH": 19,
       "frames": [
@@ -49,11 +49,23 @@
         0.95
       ],
       "renderScale": 2,
-      "note": "basic skeleton. 'brute' = this sheet at renderScale 2.5 + ui_brute_shield.png overlaid on the screen-near side. 'burning' = this sheet + animated flame overlay (fx, procedural)."
+      "clips": {
+        "idle": {
+          "frames": 2,
+          "fps": 3,
+          "row": 0
+        },
+        "move": {
+          "frames": 4,
+          "fps": 8,
+          "row": 8
+        }
+      },
+      "note": "basic skeleton. idle(2)+move(4) x 8 facings, clip sheet. 'skeleton-lord' = this sheet at higher renderScale; 'burning' = + animated flame overlay (fx, procedural)."
     },
     "mob_ghoul.png": {
-      "cols": 8,
-      "rows": 1,
+      "cols": 4,
+      "rows": 16,
       "cellW": 16,
       "cellH": 19,
       "frames": [
@@ -71,7 +83,19 @@
         0.95
       ],
       "renderScale": 2,
-      "note": "same silhouette as the skeleton, re-skinned to rotting-green palette."
+      "clips": {
+        "idle": {
+          "frames": 2,
+          "fps": 3,
+          "row": 0
+        },
+        "move": {
+          "frames": 4,
+          "fps": 8,
+          "row": 8
+        }
+      },
+      "note": "skeleton re-skinned to rotting-green (recolor of mob_skeleton_base). Same clip layout, animates identically."
     },
     "mob_bonecaster_8dir.png": {
       "cols": 8,
