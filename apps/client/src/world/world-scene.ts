@@ -4,17 +4,17 @@
 
 import {
   Application,
-  Assets,
   Container,
   Graphics,
   Rectangle,
   Sprite,
   Text,
-  Texture,
   TextureSource,
 } from 'pixi.js';
 import type { ServerMessage, Vec2, GroundItem } from '@mmo/protocol';
 import { createSnapshotReconstructor } from '@mmo/protocol';
+import { loadAssetRegistry } from './asset-registry.js';
+import { PLAYER_SHEET, FACING_SOUTH } from './asset-manifest.js';
 import { getItemBase, RARITY_COLOR, type Rarity } from '@mmo/domain';
 import { createChannelClient, type ChannelClient } from '../network/channel-client.js';
 import {
@@ -93,23 +93,16 @@ export async function mountWorldScene(
   // Pixel-art crispness: nearest-neighbor everywhere, no smoothing.
   TextureSource.defaultOptions.scaleMode = 'nearest';
 
-  // Load the 8-direction sprite sheets and slice them into frame textures.
-  // Frame order is always [e, se, s, sw, w, nw, n, ne] per the handoff.
-  function slice8(src: Texture, w: number, h: number): Texture[] {
-    src.source.scaleMode = 'nearest';
-    return Array.from(
-      { length: 8 },
-      (_, i) => new Texture({ source: src.source, frame: new Rectangle(i * w, 0, w, h) })
-    );
-  }
-  const [heroSheet, skelSheet] = await Promise.all([
-    Assets.load('/assets/hero_pyromancer_idle_8dir.png') as Promise<Texture>,
-    Assets.load('/assets/mob_skeleton_base.png') as Promise<Texture>,
-  ]);
-  const HERO_FRAMES = slice8(heroSheet, 16, 21);
-  const SKEL_FRAMES = slice8(skelSheet, 16, 19);
-  const SPRITE_SCALE = 2;
-  const SOUTH = 2; // default facing toward camera
+  // Sprites come from the manifest-driven asset registry (asset-registry.ts):
+  // every sheet declared in spritesheet_map.json is loaded + sliced, with a
+  // tinted placeholder for any sheet that hasn't been authored yet. Frame order
+  // is always [e, se, s, sw, w, nw, n, ne].
+  const assets = await loadAssetRegistry();
+  const HERO_FRAMES = assets.playerFrames();
+  const heroMeta = assets.meta(PLAYER_SHEET);
+  const HERO_SCALE = heroMeta?.renderScale ?? 2;
+  const HERO_ANCHOR = heroMeta?.anchor ?? [0.5, 0.95];
+  const SOUTH = FACING_SOUTH; // default facing toward camera
 
   /** Screen-space movement angle → 8-dir frame index [e,se,s,sw,w,nw,n,ne]. */
   function facingFromDelta(dx: number, dy: number): number {
@@ -366,9 +359,9 @@ export async function mountWorldScene(
     const feet = new Graphics()
       .ellipse(0, 1, 9, 4)
       .fill({ color: 0x000000, alpha: 0.4 });
-    const body = new Sprite(HERO_FRAMES[SOUTH]);
-    body.anchor.set(0.5, 0.95); // feet-anchored
-    body.scale.set(SPRITE_SCALE);
+    const body = new Sprite(HERO_FRAMES[SOUTH] ?? HERO_FRAMES[0]);
+    body.anchor.set(HERO_ANCHOR[0], HERO_ANCHOR[1]); // feet-anchored
+    body.scale.set(HERO_SCALE);
     if (!isMe) body.tint = 0xc9d6ff; // tint other players cool so "me" reads warm
     const label = new Text({
       text: name,
@@ -389,9 +382,10 @@ export async function mountWorldScene(
     const feet = new Graphics()
       .ellipse(0, 1, 10, 4)
       .fill({ color: 0x000000, alpha: 0.5 });
-    const body = new Sprite(SKEL_FRAMES[SOUTH]);
-    body.anchor.set(0.5, 0.95);
-    body.scale.set(SPRITE_SCALE);
+    const mf = assets.mobFrames(kind);
+    const body = new Sprite(mf.frames[SOUTH] ?? mf.frames[0]);
+    body.anchor.set(mf.anchor[0], mf.anchor[1]);
+    body.scale.set(mf.scale);
     const label = new Text({
       text: kind,
       style: { fontSize: 10, fill: 0xd8cdbb, stroke: { color: 0x000000, width: 3 } },
@@ -693,7 +687,7 @@ export async function mountWorldScene(
         const idx = facingFromDelta(ddx, ddy);
         if (idx !== entry.facing) {
           entry.facing = idx;
-          entry.body.texture = HERO_FRAMES[idx]!;
+          entry.body.texture = HERO_FRAMES[idx] ?? HERO_FRAMES[0]!;
         }
       }
       entry.lastPos = { x: p.pos.x, y: p.pos.y };
