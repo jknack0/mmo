@@ -3,6 +3,8 @@
 // Open-world zones cap at 50 (full state replication stays cheap below that);
 // towns cap at 100 (no combat → CPU/network budget spent on presence).
 
+import { getZoneDef } from '@mmo/domain';
+
 export interface ChannelInfo {
   channelId: string;
   /** WS URL clients connect to for this channel's process. */
@@ -11,15 +13,12 @@ export interface ChannelInfo {
   currentLoad: number;
 }
 
-export const ZONE_CAPS: Record<string, number> = {
-  'hold-veridian': 100,
-};
-
 /** Open-world zones (and anything unlisted) use the 50-player cap. */
 export const DEFAULT_ZONE_CAP = 50;
 
+/** Per-zone cap sourced from the shared zone defs (S17); town 100, open 50. */
 export function capForZone(zoneId: string): number {
-  return ZONE_CAPS[zoneId] ?? DEFAULT_ZONE_CAP;
+  return getZoneDef(zoneId)?.cap ?? DEFAULT_ZONE_CAP;
 }
 
 export type PickResult =

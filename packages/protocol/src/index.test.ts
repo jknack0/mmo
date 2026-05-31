@@ -70,11 +70,14 @@ describe('Protocol round-trip (JSON dev mode)', () => {
       const msg: ServerMessage = {
         type: 'welcome',
         you: 'player-1',
+        zoneId: 'ashen-plains',
         zoneSize: { x: 30, y: 30 },
         tileMap: [
           [0, 0, 1],
           [0, 1, 0],
         ],
+        npcs: [],
+        portals: [],
       };
       expect(decodeServerMessage(encodeServerMessage(msg))).toEqual(msg);
     });

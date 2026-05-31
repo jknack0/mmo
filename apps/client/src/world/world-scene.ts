@@ -38,6 +38,8 @@ export interface MountWorldSceneOptions {
   onConsumed?: (itemId: string) => void;
   /** Hands the parent a handle to drive the in-world player (e.g. use a potion). */
   onControls?: (controls: WorldSceneControls) => void;
+  /** Player stepped on a portal — the parent reconnects to the target zone. */
+  onZoneTransition?: (zoneId: string) => void;
 }
 
 export interface WorldSceneControls {
@@ -115,10 +117,11 @@ export async function mountWorldScene(
   window.addEventListener('resize', onResize);
 
   const terrainLayer = new Container();
+  const decorLayer = new Container(); // static NPCs + zone portals (S17)
   const groundLayer = new Container();
   const entityLayer = new Container();
   entityLayer.sortableChildren = true;
-  world.addChild(terrainLayer, groundLayer, entityLayer);
+  world.addChild(terrainLayer, decorLayer, groundLayer, entityLayer);
 
   // ─── Pyromancy FX engine (Claude-Design canvas overlay) ────────
   // The vendored fx engine renders in screen px on a 2D canvas layered over the
@@ -200,6 +203,49 @@ export async function mountWorldScene(
         tile.y = screen.y;
         terrainLayer.addChild(tile);
       }
+    }
+  }
+
+  // ─── Static decor: town NPCs + zone portals (S17) ──────────────
+  function decorMarker(kind: string, label: string): Container {
+    const c = new Container();
+    const isPortal = kind === 'portal' || kind === 'rift-portal';
+    const tint = isPortal ? 0x4ad0ff : kind === 'vendor' ? 0xffd24a : kind === 'trainer' ? 0xff8a6a : 0x9fd2ff;
+    const g = new Graphics();
+    if (isPortal) {
+      // A glowing portal ring on the ground.
+      g.ellipse(0, 0, 22, 11).fill({ color: tint, alpha: 0.18 }).stroke({ color: tint, width: 3 });
+      g.ellipse(0, 0, 13, 6).stroke({ color: 0xffffff, width: 2, alpha: 0.7 });
+    } else {
+      // An NPC stands as a small pillar with a base shadow.
+      g.ellipse(0, 2, 12, 6).fill({ color: 0x000000, alpha: 0.35 });
+      g.roundRect(-7, -28, 14, 28, 3).fill(tint).stroke({ color: 0x1a1410, width: 2 });
+    }
+    const text = new Text({
+      text: label,
+      style: { fontFamily: 'monospace', fontSize: 11, fill: tint, stroke: { color: 0x000000, width: 3 } },
+    });
+    text.anchor.set(0.5, 1);
+    text.y = isPortal ? -16 : -34;
+    c.addChild(g, text);
+    return c;
+  }
+
+  function drawDecor(npcsList: { kind: string; pos: Vec2; label: string }[], portalsList: { pos: Vec2; label: string }[]): void {
+    decorLayer.removeChildren();
+    for (const p of portalsList) {
+      const m = decorMarker('portal', p.label);
+      const s = tileToScreen(p.pos);
+      m.x = s.x;
+      m.y = s.y;
+      decorLayer.addChild(m);
+    }
+    for (const n of npcsList) {
+      const m = decorMarker(n.kind, n.label);
+      const s = tileToScreen(n.pos);
+      m.x = s.x;
+      m.y = s.y;
+      decorLayer.addChild(m);
     }
   }
 
@@ -345,6 +391,11 @@ export async function mountWorldScene(
         myId = msg.you;
         zoneSize = msg.zoneSize;
         drawTerrain(zoneSize, msg.tileMap);
+        drawDecor(msg.npcs ?? [], msg.portals ?? []);
+        break;
+      case 'zone-transition':
+        // Hand off to the target zone's channel (world-screen reconnects).
+        opts.onZoneTransition?.(msg.zoneId);
         break;
       case 'snapshot':
         interp.ingest(msg.snapshot);

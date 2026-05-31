@@ -11,7 +11,8 @@ import {
   type Vec2,
   type PlayerId,
 } from '@mmo/protocol';
-import { rollItemDrop, aggregateEquipped, rarityOf } from '@mmo/domain';
+import { rollItemDrop, aggregateEquipped, rarityOf, getZoneDef, portalAt } from '@mmo/domain';
+import type { WorldNpc, WorldPortal } from '@mmo/protocol';
 import {
   createZoneState,
   spawnPlayer,
@@ -42,6 +43,8 @@ interface Connection {
   playerId: PlayerId | null; // null until Hello validates
   characterId: string | null;
   accountId: string | null; // set on Hello; recorded on audit rows
+  /** Portal the player currently stands on — debounces the transition signal. */
+  onPortalId: string | null;
 }
 
 export interface ChannelServerOptions {
@@ -110,6 +113,17 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
     ? { zoneId: opts.zoneId ?? 'ashen-plains', channelId: opts.channelId, processUrl: opts.processUrl ?? '' }
     : null;
   const heartbeatMs = opts.heartbeatMs ?? 5_000;
+
+  // Static world content for this zone (S17): NPCs + zone-exit portals. Sent on
+  // welcome; portals also drive the per-tick zone-transition handoff.
+  const zoneDef = opts.zoneId ? getZoneDef(opts.zoneId) : undefined;
+  const npcs: WorldNpc[] = (zoneDef?.npcs ?? []).map((n) => ({ ...n, pos: { ...n.pos } }));
+  const portals: WorldPortal[] = (zoneDef?.portals ?? []).map((p) => ({
+    id: p.id,
+    pos: { ...p.pos },
+    targetZoneId: p.targetZoneId,
+    label: p.label,
+  }));
 
   let wss: WebSocketServer | null = null;
   let tickHandle: NodeJS.Timeout | null = null;
@@ -196,8 +210,11 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       send(ws, {
         type: 'welcome',
         you: playerId,
+        zoneId: opts.zoneId ?? '',
         zoneSize: zone.size,
         tileMap: zone.tileMap,
+        npcs,
+        portals,
       });
       publishHeartbeat(); // load changed → refresh routing immediately
       return;
@@ -339,6 +356,24 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         },
       });
     }
+    // Zone transitions (S17): a player standing on a portal is handed off to
+    // the target zone's channel. Edge-triggered via conn.onPortalId so the
+    // signal fires once on entry, not every tick while they stand there.
+    if (portals.length > 0) {
+      for (const conn of connections.values()) {
+        if (!conn.playerId) continue;
+        const player = zone.players.get(conn.playerId);
+        if (!player) continue;
+        const p = portalAt(portals, player.pos);
+        if (p && conn.onPortalId !== p.id) {
+          conn.onPortalId = p.id;
+          send(conn.ws, { type: 'zone-transition', zoneId: p.targetZoneId });
+        } else if (!p) {
+          conn.onPortalId = null;
+        }
+      }
+    }
+
     const payload = encodeServerMessage({ type: 'snapshot', snapshot: snapshotZone(zone) });
     for (const { ws } of connections.values()) {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload);
@@ -360,7 +395,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         });
         wss.on('error', reject);
         wss.on('connection', (ws) => {
-          const conn: Connection = { ws, playerId: null, characterId: null, accountId: null };
+          const conn: Connection = { ws, playerId: null, characterId: null, accountId: null, onPortalId: null };
           connections.set(ws, conn);
 
           ws.on('message', (data) => {

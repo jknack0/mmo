@@ -19,3 +19,5 @@ export * from './affixes.js';
 export * from './refinement.js';
 // S16 (#18): consumables + vendor economy.
 export * from './consumables.js';
+// S17 (#19): zone definitions + portals + NPCs.
+export * from './zones.js';
