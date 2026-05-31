@@ -7,6 +7,7 @@ import {
   allMobSheets,
   isDirectionalSheet,
   animFrameIndex,
+  clipFrameIndex,
   DIR_FRAMES,
   FACING_SOUTH,
   PLAYER_SHEET,
@@ -18,6 +19,11 @@ const RAW = {
     'mob_skeleton_base.png': { cols: 8, rows: 1, cellW: 16, cellH: 19, frames: [...DIR_FRAMES], anchor: [0.5, 0.95], renderScale: 2 },
     'icon_skills.png': { cols: 6, cellW: 16, cellH: 16, frames: ['spark', 'cinder', 'fireball', 'pyroclasm', 'combust', 'meteor'], renderScale: 2 },
     'fx_veilwisp.png': { cols: 2, cellW: 7, cellH: 8, frames: ['bob_a', 'bob_b'], renderScale: 3, fps: 6 },
+    // Multi-row clip sheet: idle (rows 0-7) + move (rows 8-15), cols = max frames.
+    'mob_skeleton_base_clips.png': {
+      cols: 4, rows: 16, cellW: 16, cellH: 19, frames: [...DIR_FRAMES], anchor: [0.5, 0.95], renderScale: 2,
+      clips: { idle: { frames: 2, fps: 3, row: 0 }, move: { frames: 4, fps: 8, row: 8 } },
+    },
   },
 };
 
@@ -92,5 +98,54 @@ describe('animation / facing frame selection (S-anim)', () => {
   it('a single-frame or fps-less sheet is always frame 0', () => {
     expect(animFrameIndex({ frameCount: 1, fps: 9, directional: false }, 500)).toBe(0);
     expect(animFrameIndex({ frameCount: 4, directional: false }, 500)).toBe(0); // no fps
+  });
+});
+
+describe('clip-aware frame selection (idle/move/attack)', () => {
+  const m = parseManifest(RAW);
+  const clip = m.sheets['mob_skeleton_base_clips.png']!; // idle@row0 (2f), move@row8 (4f), cols 4
+  const legacyDir = m.sheets['mob_skeleton_base.png']!;  // single-row 8-dir, no clips
+  const legacyLoop = m.sheets['fx_veilwisp.png']!;       // 2-frame fps loop, no clips
+
+  it('parses the clips map (frames/fps/row per state)', () => {
+    expect(clip.clips).toBeDefined();
+    expect(clip.clips!.idle).toEqual({ frames: 2, fps: 3, row: 0 });
+    expect(clip.clips!.move).toEqual({ frames: 4, fps: 8, row: 8 });
+    expect(clip.clips!.attack).toBeUndefined();
+    // Legacy sheets carry no clips.
+    expect(legacyDir.clips).toBeUndefined();
+  });
+
+  it('indexes a clip frame by (clip.row + facing) * cols + frame', () => {
+    // idle@row0, cols 4 → facing picks the row, frame 0 at t=0.
+    expect(clipFrameIndex(clip, 'idle', 0, 0)).toBe(0);          // east:  (0+0)*4
+    expect(clipFrameIndex(clip, 'idle', FACING_SOUTH, 0)).toBe(8); // south: (0+2)*4
+    expect(clipFrameIndex(clip, 'idle', 7, 0)).toBe(28);         // ne:    (0+7)*4
+  });
+
+  it('loops a move clip over time, modulo its frame count', () => {
+    // move@row8, cols 4, 4 frames @ 8fps (125ms/frame), facing south → base row 10 → 40.
+    expect(clipFrameIndex(clip, 'move', FACING_SOUTH, 0)).toBe(40);   // frame 0
+    expect(clipFrameIndex(clip, 'move', FACING_SOUTH, 130)).toBe(41); // frame 1
+    expect(clipFrameIndex(clip, 'move', FACING_SOUTH, 390)).toBe(43); // frame 3
+    expect(clipFrameIndex(clip, 'move', FACING_SOUTH, 520)).toBe(40); // wraps to 0
+  });
+
+  it('degrades a missing clip to idle', () => {
+    // No attack block on this sheet → falls back to idle (row 0).
+    expect(clipFrameIndex(clip, 'attack', FACING_SOUTH, 999)).toBe(8); // = idle south frame 0
+  });
+
+  it('legacy 8-dir sheets ignore state and pick the facing frame', () => {
+    // Single-row 8-dir, no clips: facing selects the column, state is irrelevant.
+    expect(clipFrameIndex(legacyDir, 'move', 0, 9999)).toBe(0);
+    expect(clipFrameIndex(legacyDir, 'idle', FACING_SOUTH, 0)).toBe(FACING_SOUTH);
+    expect(clipFrameIndex(legacyDir, 'attack', 7, 0)).toBe(7);
+  });
+
+  it('legacy loop sheets time-loop; single/no-clip sheets stay on frame 0', () => {
+    expect(clipFrameIndex(legacyLoop, 'idle', FACING_SOUTH, 0)).toBe(0);
+    expect(clipFrameIndex(legacyLoop, 'idle', FACING_SOUTH, 170)).toBe(1); // 6fps → frame 1
+    expect(clipFrameIndex(m.sheets['icon_skills.png']!, 'idle', 0, 500)).toBe(0); // no fps → static
   });
 });

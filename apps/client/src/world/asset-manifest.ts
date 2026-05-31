@@ -6,6 +6,24 @@
 // (asset-registry.ts) fetches the JSON, feeds it here, and turns the rectangles
 // into GPU textures.
 
+/** Animation states an actor sheet can carry (S-anim clips). */
+export type ClipState = 'idle' | 'move' | 'attack';
+
+/**
+ * One animation clip on a multi-row actor sheet. The clip occupies an
+ * 8-facing block of rows starting at `row` (one row per facing, frame order
+ * [e,se,s,sw,w,nw,n,ne]); `frames` columns wide, looped at `fps`.
+ */
+export interface ClipMeta {
+  frames: number;
+  fps: number;
+  /** Starting row of this clip's 8-facing block (idle 0, move 8, attack 16). */
+  row: number;
+}
+
+/** Canonical row order for clip blocks when a manifest omits explicit rows. */
+export const CLIP_ORDER: ClipState[] = ['idle', 'move', 'attack'];
+
 export interface SheetMeta {
   /** File under /assets, the sheet key itself. */
   key: string;
@@ -21,15 +39,22 @@ export interface SheetMeta {
   renderScale: number;
   /** Animation rate for looped sheets (fx), if any. */
   fps?: number;
+  /**
+   * Per-state animation clips (idle/move/attack), each an 8-facing × frames
+   * block. Absent on legacy single-row sheets, which behave as a static idle.
+   */
+  clips?: Partial<Record<ClipState, ClipMeta>>;
 }
 
 export interface SpriteManifest {
   sheets: Record<string, SheetMeta>;
 }
 
+interface RawClip { frames?: number; fps?: number; row?: number; }
 interface RawSheet {
   cols?: number; rows?: number; cellW?: number; cellH?: number;
   frames?: string[]; anchor?: [number, number]; renderScale?: number; fps?: number;
+  clips?: Partial<Record<ClipState, RawClip>>;
 }
 interface RawManifest {
   defaults?: { rows?: number; renderScale?: number };
@@ -55,9 +80,25 @@ export function parseManifest(raw: unknown): SpriteManifest {
       anchor: s.anchor ?? [0.5, 0.95],
       renderScale: s.renderScale ?? r.defaults?.renderScale ?? 2,
       fps: s.fps,
+      ...(s.clips ? { clips: parseClips(s.clips) } : {}),
     };
   }
   return { sheets };
+}
+
+/** Normalise raw clips: fill missing `row` from the canonical block order. */
+function parseClips(raw: Partial<Record<ClipState, RawClip>>): Partial<Record<ClipState, ClipMeta>> {
+  const out: Partial<Record<ClipState, ClipMeta>> = {};
+  for (const state of CLIP_ORDER) {
+    const c = raw[state];
+    if (!c) continue;
+    out[state] = {
+      frames: c.frames ?? 1,
+      fps: c.fps ?? 0,
+      row: c.row ?? CLIP_ORDER.indexOf(state) * 8,
+    };
+  }
+  return out;
 }
 
 export interface FrameRect { x: number; y: number; w: number; h: number; }
@@ -105,11 +146,38 @@ export function animFrameIndex(sel: AnimSelect, elapsedMs: number): number {
     const f = sel.facing ?? FACING_SOUTH;
     return Math.min(Math.max(f, 0), sel.frameCount - 1);
   }
-  const fps = sel.fps ?? 0;
-  if (fps > 0 && sel.frameCount > 1) {
-    return Math.floor((elapsedMs / 1000) * fps) % sel.frameCount;
+  return loopFrame(sel.fps ?? 0, sel.frameCount, elapsedMs);
+}
+
+/** Frame within a looped clip: time→index, static (0) when fps≤0 or ≤1 frame. */
+function loopFrame(fps: number, count: number, elapsedMs: number): number {
+  if (count <= 1 || fps <= 0) return 0;
+  return Math.floor((elapsedMs / 1000) * fps) % count;
+}
+
+/**
+ * Flat index into the sliced texture array for an actor showing `state` while
+ * `facing`, at `elapsedMs` into the current clip. Unifies the clip model with
+ * legacy sheets so the renderer is a thin caller:
+ *  - clip sheet  → (clip.row + facing) * cols + loopFrame(fps, frames)  [facing = row]
+ *  - legacy 8-dir → facing                                              [facing = col]
+ *  - legacy loop → time-loop over frames; single → 0
+ * A requested clip that's missing degrades to idle, then to frame 0.
+ */
+export function clipFrameIndex(
+  meta: SheetMeta,
+  state: ClipState,
+  facing: number,
+  elapsedMs: number
+): number {
+  const f = Math.min(Math.max(facing, 0), 7);
+  const clip = meta.clips?.[state] ?? meta.clips?.idle;
+  if (clip) {
+    return (clip.row + f) * meta.cols + loopFrame(clip.fps, clip.frames, elapsedMs);
   }
-  return 0;
+  // Legacy sheets: 8-dir picks the facing frame; everything else time-loops.
+  if (isDirectionalSheet(meta)) return Math.min(f, meta.frames.length - 1);
+  return loopFrame(meta.fps ?? 0, meta.frames.length, elapsedMs);
 }
 
 // ─── Mob kind → sheet + render scale ────────────────────────────
