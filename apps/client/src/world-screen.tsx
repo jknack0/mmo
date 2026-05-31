@@ -14,6 +14,7 @@ import { VendorPanel } from './vendor-panel.js';
 import { DisciplinePanel } from './discipline-panel.js';
 import { QuestPanel } from './quest-panel.js';
 import { fetchQuests, reportQuestKill } from './quests.js';
+import { e2eSet } from './e2e-hook.js';
 
 export interface WorldScreenProps {
   sessionToken: string;
@@ -129,10 +130,10 @@ export function WorldScreen(props: WorldScreenProps) {
             props.onLeave();
           }
         },
-        onStats: setStats,
+        onStats: (s) => { setStats(s); e2eSet({ stats: s }); },
         onPickup: () => setPickupKey((k) => k + 1),
         onConsumed: () => setPickupKey((k) => k + 1),
-        onControls: (c) => (controls = c),
+        onControls: (c) => { controls = c; e2eSet({ controls: c, characterId: info.character.id, sessionToken: props.sessionToken }); },
         onZoneTransition: (target) => {
           if (transitioning) return;
           transitioning = true;

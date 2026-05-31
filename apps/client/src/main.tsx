@@ -13,6 +13,7 @@ import {
 import { fetchMe, type Character } from './character-client.js';
 import { CharacterSelect } from './character-select.js';
 import { WorldScreen } from './world-screen.js';
+import { e2eSet } from './e2e-hook.js';
 
 interface Session {
   sessionToken: string;
@@ -41,6 +42,11 @@ function App() {
         }
       })();
     }
+  });
+
+  // E2E hook (S26): publish the current app phase for the Playwright driver.
+  createEffect(() => {
+    e2eSet({ phase: !session() ? 'login' : !activeCharacter() ? 'character' : 'world' });
   });
 
   function logout(): void {
