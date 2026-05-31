@@ -81,7 +81,7 @@ export interface ZoneSnapshot {
 // ─── Client → Channel ───────────────────────────────────────────
 
 export type ClientMessage =
-  | { type: 'hello'; sessionToken: string; characterId: CharacterId; name: string }
+  | { type: 'hello'; sessionToken: string; characterId: CharacterId; name: string; instanceId?: string }
   | { type: 'move'; target: Vec2 }
   | { type: 'attack'; targetId: EntityId; skillId: SkillId }
   | { type: 'dodge' }
@@ -107,12 +107,15 @@ export type ServerMessage =
       type: 'welcome';
       you: PlayerId;
       zoneId: string;
+      /** Instance id for instanced zones (Rifts, S19); '' for shared zones. */
+      instanceId: string;
       zoneSize: Vec2;
       tileMap: number[][];
       npcs: WorldNpc[];
       portals: WorldPortal[];
     }
   | { type: 'zone-transition'; zoneId: string }
+  | { type: 'rift-status'; phase: string; kills: number; quota: number }
   | { type: 'snapshot'; snapshot: ZoneSnapshot }
   | { type: 'damage'; event: DamageEvent }
   | { type: 'picked-up'; itemId: EntityId; baseId: string }
@@ -157,6 +160,7 @@ export function decodeClientMessage(raw: string): ClientMessage {
         sessionToken: parsed.sessionToken,
         characterId: parsed.characterId,
         name: parsed.name,
+        ...(typeof parsed.instanceId === 'string' ? { instanceId: parsed.instanceId } : {}),
       };
     case 'move':
       if (!isVec2(parsed.target)) {
@@ -204,6 +208,7 @@ export function decodeServerMessage(raw: string): ServerMessage {
         type: 'welcome',
         you: parsed.you,
         zoneId: typeof parsed.zoneId === 'string' ? parsed.zoneId : '',
+        instanceId: typeof parsed.instanceId === 'string' ? parsed.instanceId : '',
         zoneSize: parsed.zoneSize,
         tileMap: parsed.tileMap as number[][],
         npcs: Array.isArray(parsed.npcs) ? (parsed.npcs as WorldNpc[]) : [],
@@ -214,6 +219,15 @@ export function decodeServerMessage(raw: string): ServerMessage {
         throw new Error('protocol: malformed zone-transition');
       }
       return { type: 'zone-transition', zoneId: parsed.zoneId };
+    case 'rift-status':
+      if (
+        typeof parsed.phase !== 'string' ||
+        typeof parsed.kills !== 'number' ||
+        typeof parsed.quota !== 'number'
+      ) {
+        throw new Error('protocol: malformed rift-status');
+      }
+      return { type: 'rift-status', phase: parsed.phase, kills: parsed.kills, quota: parsed.quota };
     case 'snapshot': {
       if (typeof parsed.snapshot !== 'object' || parsed.snapshot === null) {
         throw new Error('protocol: malformed snapshot');

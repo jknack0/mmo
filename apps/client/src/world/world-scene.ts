@@ -21,6 +21,7 @@ import {
   type InterpolatedMobState,
 } from '../network/snapshot-interpolator.js';
 import { tileToScreen, screenToTile, ISO_TILE_W, ISO_TILE_H } from './iso-coords.js';
+import { RIFT_T1 } from '@mmo/domain';
 import { fx, SKILL_GLYPH } from './fx.js';
 
 export interface MountWorldSceneOptions {
@@ -42,6 +43,8 @@ export interface MountWorldSceneOptions {
   onZoneTransition?: (zoneId: string) => void;
   /** Local player's HP hit 0 — the parent shows the death screen. */
   onDeath?: () => void;
+  /** Rift phase/progress update (S19), for the objective banner. */
+  onRiftStatus?: (s: { phase: string; kills: number; quota: number }) => void;
 }
 
 export interface WorldSceneControls {
@@ -247,6 +250,16 @@ export async function mountWorldScene(
       const s = tileToScreen(n.pos);
       m.x = s.x;
       m.y = s.y;
+      // The Rift portal NPC is interactive — click it to enter a fresh Rift (S19).
+      if (n.kind === 'rift-portal') {
+        m.eventMode = 'static';
+        m.cursor = 'pointer';
+        m.hitArea = new Rectangle(-24, -24, 48, 48);
+        m.on('pointerdown', (e) => {
+          e.stopPropagation();
+          opts.onZoneTransition?.(RIFT_T1);
+        });
+      }
       decorLayer.addChild(m);
     }
   }
@@ -398,6 +411,9 @@ export async function mountWorldScene(
       case 'zone-transition':
         // Hand off to the target zone's channel (world-screen reconnects).
         opts.onZoneTransition?.(msg.zoneId);
+        break;
+      case 'rift-status':
+        opts.onRiftStatus?.({ phase: msg.phase, kills: msg.kills, quota: msg.quota });
         break;
       case 'snapshot':
         interp.ingest(msg.snapshot);

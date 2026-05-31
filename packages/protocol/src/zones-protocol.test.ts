@@ -8,6 +8,7 @@ describe('welcome carries zone identity + npcs + portals', () => {
         type: 'welcome',
         you: 'p1',
         zoneId: 'hold-veridian',
+        instanceId: '',
         zoneSize: { x: 30, y: 30 },
         tileMap: [[1, 1], [1, 0]],
         npcs: [{ id: 'v', kind: 'vendor', pos: { x: 12, y: 14 }, label: 'Quartermaster' }],

@@ -75,6 +75,7 @@ export function WorldScreen(props: WorldScreenProps) {
   const [zoneName, setZoneName] = createSignal('The Sundered Reaches');
   const [dead, setDead] = createSignal(false);
   const [respawning, setRespawning] = createSignal(false);
+  const [rift, setRift] = createSignal<{ phase: string; kills: number; quota: number } | null>(null);
   let mountEl: HTMLDivElement | undefined;
   let cleanup: (() => void) | null = null;
   let controls: WorldSceneControls | null = null;
@@ -95,7 +96,8 @@ export function WorldScreen(props: WorldScreenProps) {
       cleanup?.();
       cleanup = null;
       mountEl.replaceChildren(); // drop the old canvas before mounting the new one
-      setZoneName(ZONE_NAMES[info.zoneId ?? ''] ?? 'The Sundered Reaches');
+      setRift(null); // clear any prior Rift objective on a zone change
+      setZoneName(ZONE_NAMES[info.zoneId ?? ''] ?? (info.zoneId === 'rift-t1' ? 'The First Rift' : 'The Sundered Reaches'));
       cleanup = await mountWorldScene({
         container: mountEl,
         wsUrl: info.wsUrl,
@@ -115,6 +117,7 @@ export function WorldScreen(props: WorldScreenProps) {
           void mountZone(target).finally(() => (transitioning = false));
         },
         onDeath: () => setDead(true),
+        onRiftStatus: (s) => setRift(s),
       });
     } catch (e) {
       setError((e as Error).message);
@@ -153,6 +156,22 @@ export function WorldScreen(props: WorldScreenProps) {
         <div class="ts-zone-name">{zoneName()}</div>
         <div class="ts-zone-sub">{props.character.name} · click to move · walk into a portal to travel</div>
       </div>
+
+      {/* HUD: Rift objective banner (S19) */}
+      <Show when={rift() && rift()!.phase !== 'complete'}>
+        <div class="absolute top-3 left-1/2 -translate-x-1/2 px-4 py-2 text-center" style={{ background: 'rgba(8,6,6,.6)', 'box-shadow': '0 0 0 2px #080706, 0 0 0 4px #5a1f2b' }}>
+          <Show
+            when={rift()!.phase === 'mini-boss'}
+            fallback={
+              <div class="ts-zone-name" style={{ 'font-size': '15px', color: '#ff9f6a' }}>
+                THE FIRST RIFT · {rift()!.kills}/{rift()!.quota} slain
+              </div>
+            }
+          >
+            <div class="ts-zone-name" style={{ 'font-size': '15px', color: '#ff4d4d' }}>⚔ MINI-BOSS — SLAY THE SKELETON LORD</div>
+          </Show>
+        </div>
+      </Show>
 
       {/* HUD: bottom-left resource orbs */}
       <div class="absolute bottom-3 left-3 flex items-end gap-2">

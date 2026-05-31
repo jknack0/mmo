@@ -75,6 +75,8 @@ export interface ServerMob {
   burnLastAttackerId: PlayerId | null;
   /** Wall-clock ms when this mob may next deal contact damage (S16 aggro). */
   attackReadyAt: number;
+  /** Contact-bite damage. Bosses hit harder than trash (S19). */
+  contactDamage: number;
 }
 
 /** A dropped item lying in the world (S13/S14). `id` is the server-issued item UUID. */
@@ -115,6 +117,8 @@ export interface MobSpawnInput {
   pos: Vec2;
   maxHp: number;
   respawnMs?: number;
+  /** Override contact-bite damage (S19 bosses). Defaults to MOB_CONTACT_DAMAGE. */
+  contactDamage?: number;
 }
 
 import { createResourceState } from '../resources/resource-system.js';
@@ -226,6 +230,7 @@ export function spawnMob(zone: ZoneState, input: MobSpawnInput): ServerMob {
     burnLastTickAt: 0,
     burnLastAttackerId: null,
     attackReadyAt: 0,
+    contactDamage: input.contactDamage ?? MOB_CONTACT_DAMAGE,
   };
   zone.mobs.set(input.id, mob);
   return mob;
@@ -495,13 +500,14 @@ export function stepMobAggro(zone: ZoneState, dtSec: number, nowMs: number): Mob
     if (nowMs < mob.attackReadyAt) continue;
     if (nowMs < target.dodgeInvulUntil) continue;
     mob.attackReadyAt = nowMs + MOB_ATTACK_COOLDOWN_MS;
-    target.hp = Math.max(0, target.hp - MOB_CONTACT_DAMAGE);
+    const dmg = mob.contactDamage;
+    target.hp = Math.max(0, target.hp - dmg);
     let fatal = false;
     if (target.hp <= 0) {
       fatal = true;
       killPlayer(target);
     }
-    hits.push({ playerId: target.id, mobId: mob.id, amount: MOB_CONTACT_DAMAGE, fatal });
+    hits.push({ playerId: target.id, mobId: mob.id, amount: dmg, fatal });
   }
   return hits;
 }

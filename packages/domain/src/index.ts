@@ -23,3 +23,5 @@ export * from './consumables.js';
 export * from './zones.js';
 // S18 (#20): death + respawn economy.
 export * from './respawn.js';
+// S19 (#21): Rift instance phase machine.
+export * from './rift.js';
