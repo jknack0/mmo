@@ -51,6 +51,8 @@ export interface InventoryRepo {
   unequip(characterId: string, gearSlot: string): Promise<boolean>;
   getMaterials(characterId: string): Promise<number>;
   getGold(characterId: string): Promise<number>;
+  /** Atomically deduct gold if affordable. Returns false (no change) if not. */
+  spendGold(characterId: string, amount: number): Promise<boolean>;
 }
 
 /** Smallest non-negative slot index not already occupied. */
@@ -175,6 +177,23 @@ export function createInventoryRepo(db: Kysely<Database>): InventoryRepo {
         .where('id', '=', characterId)
         .executeTakeFirst();
       return row?.gold ?? 0;
+    },
+
+    async spendGold(characterId, amount) {
+      return db.transaction().execute(async (trx) => {
+        const chr = await trx
+          .selectFrom('characters')
+          .select('gold')
+          .where('id', '=', characterId)
+          .executeTakeFirstOrThrow();
+        if (chr.gold < amount) return false;
+        await trx
+          .updateTable('characters')
+          .set({ gold: chr.gold - amount })
+          .where('id', '=', characterId)
+          .execute();
+        return true;
+      });
     },
 
     async equip(characterId, itemId, gearSlot) {

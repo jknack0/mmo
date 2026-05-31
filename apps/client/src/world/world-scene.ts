@@ -43,8 +43,8 @@ export interface MountWorldSceneOptions {
   onZoneTransition?: (zoneId: string) => void;
   /** Local player's HP hit 0 — the parent shows the death screen. */
   onDeath?: () => void;
-  /** Rift phase/progress update (S19), for the objective banner. */
-  onRiftStatus?: (s: { phase: string; kills: number; quota: number }) => void;
+  /** Rift phase/progress update (S19/S20), for the objective banner. */
+  onRiftStatus?: (s: { phase: string; kills: number; quota: number; deaths: number; maxDeaths: number }) => void;
 }
 
 export interface WorldSceneControls {
@@ -413,7 +413,7 @@ export async function mountWorldScene(
         opts.onZoneTransition?.(msg.zoneId);
         break;
       case 'rift-status':
-        opts.onRiftStatus?.({ phase: msg.phase, kills: msg.kills, quota: msg.quota });
+        opts.onRiftStatus?.({ phase: msg.phase, kills: msg.kills, quota: msg.quota, deaths: msg.deaths, maxDeaths: msg.maxDeaths });
         break;
       case 'snapshot':
         interp.ingest(msg.snapshot);

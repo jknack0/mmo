@@ -19,6 +19,7 @@ import {
   spendWrath,
 } from '../resources/resource-system.js';
 import { applyTripod, PYROMANCY_TRIPODS } from './tripods.js';
+import { DISCIPLINES, PYROMANCY } from '@mmo/domain';
 
 export interface SkillDef {
   id: SkillId;
@@ -141,15 +142,37 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     spiritCost: 0, wrathCost: 100,
     burnStacksApplied: 3,
   },
+
+  // ─── Blademaster (S11 #13) — physical weapon skills, no Fire ────
+  slash: {
+    id: 'slash', label: 'Slash',
+    cooldownMs: 400, rangeTiles: 2, damage: 14,
+    spiritCost: 6, wrathCost: 0,
+  },
+  'blade-dash': {
+    id: 'blade-dash', label: 'Blade Dash',
+    cooldownMs: 6_000, rangeTiles: 6, damage: 10,
+    spiritCost: 4, wrathCost: 0,
+  },
+  cleave: {
+    id: 'cleave', label: 'Cleave',
+    cooldownMs: 4_000, rangeTiles: 2, damage: 22,
+    spiritCost: 14, wrathCost: 0,
+  },
+  'decisive-strike': {
+    id: 'decisive-strike', label: 'Decisive Strike',
+    cooldownMs: 9_000, rangeTiles: 2, damage: 45,
+    spiritCost: 28, wrathCost: 0,
+  },
 };
 
-// School/category tags drive passive scaling (S10 #12). Applied here rather
-// than inline so the rules stay readable: every Pyromancy skill is Fire;
-// explosion- and heavy-nuke-type skills add their respective node hooks.
+// School/category tags drive passive scaling (S10 #12). The Fire tag is keyed
+// off the Pyromancy discipline registry (S11) — not a "not basic-attack"
+// catch-all — so Blademaster (and any future discipline) is correctly physical.
 const EXPLOSION_SKILLS: SkillId[] = ['fireball', 'combust', 'meteor', 'cataclysm'];
 const HEAVY_NUKE_SKILLS: SkillId[] = ['meteor', 'firestorm'];
-for (const [id, def] of Object.entries(SKILL_DEFS)) {
-  if (id !== 'basic-attack') def.fire = true;
+for (const id of DISCIPLINES[PYROMANCY]!.skillIds) {
+  if (SKILL_DEFS[id]) SKILL_DEFS[id]!.fire = true;
 }
 for (const id of EXPLOSION_SKILLS) SKILL_DEFS[id]!.explosion = true;
 for (const id of HEAVY_NUKE_SKILLS) SKILL_DEFS[id]!.heavyNuke = true;
@@ -217,9 +240,10 @@ function applySkillDamage(
     bonus = detonateBurns(zone, targetId, perStack);
   }
 
-  // Weapon (non-fire) attacks gain flat weapon damage from equipped gear (S13).
+  // Weapon (non-fire) skills — basic attack + Blademaster (S11) — gain flat
+  // weapon damage from gear and scale by the Blademaster weaponDamageMult.
   let dmg = def.damage * dmgMult;
-  if (!def.fire) dmg += stats.weaponDamageBonus;
+  if (!def.fire) dmg = (def.damage + stats.weaponDamageBonus) * stats.weaponDamageMult;
   const total = Math.round(dmg) + bonus;
   const { fatal, applied } = damageMob(zone, targetId, total, nowMs);
 

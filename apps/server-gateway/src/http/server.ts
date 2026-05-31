@@ -14,6 +14,12 @@ import {
   savePassives,
   isValidAllocation,
 } from '../passive/passive-store.js';
+import {
+  loadDisciplines,
+  saveDisciplines,
+  validateEquippedDisciplines,
+} from '../discipline/discipline-store.js';
+import { DISCIPLINE_SWITCH_COST } from '@mmo/domain';
 import type { InventoryRepo } from '../inventory/inventory-repo.js';
 import type { TappingService } from '../tapping/tapping-service.js';
 import type { VendorService } from '../vendor/vendor-service.js';
@@ -68,6 +74,7 @@ const CHARACTER_ERROR_STATUS: Record<CharacterError, number> = {
 const PLAY_PATH = /^\/characters\/([0-9a-f-]{36})\/play$/;
 const TRIPOD_PATH = /^\/characters\/([0-9a-f-]{36})\/tripods$/;
 const PASSIVE_PATH = /^\/characters\/([0-9a-f-]{36})\/passives$/;
+const DISCIPLINE_PATH = /^\/characters\/([0-9a-f-]{36})\/disciplines$/;
 const INVENTORY_PATH = /^\/characters\/([0-9a-f-]{36})\/inventory$/;
 const EQUIP_PATH = /^\/characters\/([0-9a-f-]{36})\/equip$/;
 const UNEQUIP_PATH = /^\/characters\/([0-9a-f-]{36})\/unequip$/;
@@ -375,6 +382,45 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           detail: { points: Object.values(body.allocation as Record<string, number>).reduce((a, b) => a + b, 0) },
         });
         sendJson(res, 200, { allocation: body.allocation });
+        return;
+      }
+
+      // ─── GET/PUT /characters/:id/disciplines (S11) ────────────
+      const discMatch = DISCIPLINE_PATH.exec(url.pathname);
+      if (discMatch && (req.method === 'GET' || req.method === 'PUT')) {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        const characterId = discMatch[1]!;
+        const character = await characters.loadCharacter(session.accountId, characterId);
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        if (req.method === 'GET') {
+          sendJson(res, 200, { equipped: await loadDisciplines(redis, characterId) });
+          return;
+        }
+        // PUT — switching disciplines costs gold and clears the passive
+        // allocation (ADR-0004: a fresh tree per loadout).
+        const body = await readJsonBody<{ equipped?: unknown }>(req);
+        if (!validateEquippedDisciplines(body.equipped)) {
+          sendJson(res, 400, { error: 'invalid-disciplines' });
+          return;
+        }
+        const paid = await inventory.spendGold(characterId, DISCIPLINE_SWITCH_COST);
+        if (!paid) {
+          sendJson(res, 400, { error: 'insufficient-gold' });
+          return;
+        }
+        await saveDisciplines(redis, characterId, body.equipped);
+        await savePassives(redis, characterId, {}); // dropped allocation, per ADR-0004
+        await audit?.append({
+          action: 'discipline-set',
+          accountId: session.accountId,
+          characterId,
+          detail: { equipped: body.equipped, cost: DISCIPLINE_SWITCH_COST },
+        });
+        sendJson(res, 200, { equipped: body.equipped, gold: await inventory.getGold(characterId) });
         return;
       }
 

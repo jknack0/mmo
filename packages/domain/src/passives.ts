@@ -9,7 +9,7 @@
 // This module is pure data + pure validators. StatCalculator (stat-calculator.ts)
 // folds the `effects` into final character stats.
 
-export type PassivePath = 'root' | 'direct' | 'burn' | 'utility';
+export type PassivePath = 'root' | 'direct' | 'burn' | 'utility' | 'blade';
 
 export type KeystoneKey = 'flashburn' | 'inferno' | 'pyromancers-ward';
 
@@ -25,6 +25,8 @@ export type PassiveMod =
   | { stat: 'wrathGenMult'; addPct: number }
   | { stat: 'detonatorDamagePerStackMult'; addPct: number }
   | { stat: 'maxBurnStacks'; addFlat: number }
+  /** Blademaster (S11) — scales weapon (physical) skill damage. */
+  | { stat: 'weaponDamageMult'; addPct: number }
   /** Annihilator — +addPct Fire damage per equipped Pyro skill, capped at capPct. */
   | { stat: 'fireDamagePerEquippedPyro'; addPct: number; capPct: number }
   /** Keystone — a build-defining mechanic resolved in StatCalculator. */
@@ -134,6 +136,20 @@ export const PASSIVE_NODES: PassiveNode[] = [
   node('pyromancers-ward', "Pyromancer's Ward", 'utility', 6, ['phoenix-resilience'], [
     { kind: 'keystone', key: 'pyromancers-ward' },
   ], 'KEYSTONE — -20% damage taken while ≥1 Burn stack is active on an enemy within 5m.'),
+
+  // ─── [Blade] Blademaster (S11 #13) — physical, shares the 20-pt pool ──
+  node('honed-edge', 'Honed Edge', 'blade', 1, ROOTS, [
+    { stat: 'weaponDamageMult', addPct: 10 },
+  ], '+10% weapon (physical) damage.'),
+  node('bladedancer', 'Bladedancer', 'blade', 2, ['honed-edge'], [
+    { stat: 'critChance', addPct: 5 },
+  ], '+5% crit chance with weapon skills.'),
+  node('executioner', 'Executioner', 'blade', 3, ['bladedancer'], [
+    { stat: 'weaponDamageMult', addPct: 15 },
+  ], '+15% weapon damage.'),
+  node('whirlwind-master', 'Whirlwind Master', 'blade', 4, ['executioner'], [
+    { kind: 'flag', key: 'whirlwind-master' },
+  ], 'Cleave hits a wider arc and refunds Spirit on a 2+ target hit.'),
 ];
 
 const NODE_BY_ID = new Map<string, PassiveNode>(PASSIVE_NODES.map((n) => [n.id, n]));
