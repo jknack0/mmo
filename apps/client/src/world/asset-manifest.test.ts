@@ -5,6 +5,8 @@ import {
   frameIndex,
   mobRender,
   allMobSheets,
+  isDirectionalSheet,
+  animFrameIndex,
   DIR_FRAMES,
   FACING_SOUTH,
   PLAYER_SHEET,
@@ -59,5 +61,36 @@ describe('asset manifest (pure)', () => {
   it('lists the distinct mob sheets to preload, plus the player sheet const', () => {
     expect(allMobSheets()).toEqual(expect.arrayContaining(['mob_skeleton_base.png', 'mob_ghoul.png', 'mob_bonecaster_8dir.png']));
     expect(PLAYER_SHEET).toBe('hero_pyromancer_idle_8dir.png');
+  });
+});
+
+describe('animation / facing frame selection (S-anim)', () => {
+  const m = parseManifest(RAW);
+  const dir = m.sheets['mob_skeleton_base.png']!;   // 8 facings
+  const loop = m.sheets['fx_veilwisp.png']!;        // 2-frame, fps 6
+
+  it('detects directional (8-dir) sheets vs animation loops', () => {
+    expect(isDirectionalSheet(dir)).toBe(true);
+    expect(isDirectionalSheet(loop)).toBe(false);
+    expect(isDirectionalSheet(m.sheets['icon_skills.png']!)).toBe(false);
+  });
+
+  it('directional sheets pick the facing frame (clamped)', () => {
+    expect(animFrameIndex({ frameCount: 8, directional: true, facing: 0 }, 9999)).toBe(0);   // east
+    expect(animFrameIndex({ frameCount: 8, directional: true, facing: FACING_SOUTH }, 0)).toBe(FACING_SOUTH);
+    expect(animFrameIndex({ frameCount: 8, directional: true, facing: 99 }, 0)).toBe(7);      // clamp
+    expect(animFrameIndex({ frameCount: 8, directional: true }, 0)).toBe(FACING_SOUTH);       // default
+  });
+
+  it('fps sheets loop over time, modulo frame count', () => {
+    const sel = { frameCount: 2, fps: 6, directional: false };
+    expect(animFrameIndex(sel, 0)).toBe(0);
+    expect(animFrameIndex(sel, 170)).toBe(1);     // ~1 frame at 6fps (166ms)
+    expect(animFrameIndex(sel, 340)).toBe(0);     // wraps
+  });
+
+  it('a single-frame or fps-less sheet is always frame 0', () => {
+    expect(animFrameIndex({ frameCount: 1, fps: 9, directional: false }, 500)).toBe(0);
+    expect(animFrameIndex({ frameCount: 4, directional: false }, 500)).toBe(0); // no fps
   });
 });

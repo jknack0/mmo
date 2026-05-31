@@ -79,6 +79,39 @@ export function frameIndex(meta: SheetMeta, name: string): number {
   return i >= 0 ? i : 0;
 }
 
+/** A sheet whose frames are the 8 facings (vs. a time-animated loop). */
+export function isDirectionalSheet(meta: SheetMeta): boolean {
+  return meta.frames.length >= 8 && DIR_FRAMES.every((d, i) => meta.frames[i] === d);
+}
+
+export interface AnimSelect {
+  frameCount: number;
+  /** Loop rate for non-directional sheets; 0/undefined = static. */
+  fps?: number;
+  /** True when frames are facings (pick by `facing`, no time loop). */
+  directional: boolean;
+  /** Current facing 0..7 (only used when directional). */
+  facing?: number;
+}
+
+/**
+ * Which frame to display now. Directional sheets pick the facing frame;
+ * fps sheets loop over time; everything else is the first frame. Pure so the
+ * renderer stays a thin caller (S-anim).
+ */
+export function animFrameIndex(sel: AnimSelect, elapsedMs: number): number {
+  if (sel.frameCount <= 0) return 0;
+  if (sel.directional) {
+    const f = sel.facing ?? FACING_SOUTH;
+    return Math.min(Math.max(f, 0), sel.frameCount - 1);
+  }
+  const fps = sel.fps ?? 0;
+  if (fps > 0 && sel.frameCount > 1) {
+    return Math.floor((elapsedMs / 1000) * fps) % sel.frameCount;
+  }
+  return 0;
+}
+
 // ─── Mob kind → sheet + render scale ────────────────────────────
 export interface MobRender { sheet: string; scale: number; }
 
