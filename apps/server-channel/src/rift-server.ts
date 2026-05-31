@@ -320,7 +320,7 @@ export function buildRiftServer(opts: RiftServerOptions): RiftServer {
     publishHeartbeat();
   }
 
-  async function handleMessage(ws: WebSocket, conn: Connection, raw: string): Promise<void> {
+  async function handleMessage(ws: WebSocket, conn: Connection, raw: Uint8Array | string): Promise<void> {
     let msg: ClientMessage;
     try {
       msg = decodeClientMessage(raw);
@@ -408,7 +408,8 @@ export function buildRiftServer(opts: RiftServerOptions): RiftServer {
           const conn: Connection = { ws, playerId: null, characterId: null, accountId: null, instanceId: null };
           connections.set(ws, conn);
           ws.on('message', (data) => {
-            handleMessage(ws, conn, data.toString()).catch((err) => console.error('[rift] handler error:', err));
+            const bytes = Array.isArray(data) ? Buffer.concat(data) : (data as Buffer);
+            handleMessage(ws, conn, bytes).catch((err) => console.error('[rift] handler error:', err));
           });
           ws.on('close', () => {
             connections.delete(ws);

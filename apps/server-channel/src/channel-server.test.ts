@@ -28,10 +28,9 @@ async function waitFor<T extends ServerMessage>(
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('waitFor timed out')), timeoutMs);
     const handler = (data: WebSocket.RawData) => {
-      const raw = data.toString();
       let msg: ServerMessage;
       try {
-        msg = decodeServerMessage(raw);
+        msg = decodeServerMessage(data as Uint8Array);
       } catch {
         return;
       }
@@ -239,7 +238,7 @@ describe('ChannelServer', () => {
       const timer = setTimeout(() => reject(new Error('no fatal hit within 3s')), 3000);
       const handler = (data: WebSocket.RawData) => {
         let msg: ServerMessage;
-        try { msg = decodeServerMessage(data.toString()); } catch { return; }
+        try { msg = decodeServerMessage(data as Uint8Array); } catch { return; }
         if (msg.type === 'damage' && msg.event.fatal) {
           clearTimeout(timer);
           ws.off('message', handler);

@@ -34,6 +34,9 @@ export function createChannelClient(opts: ChannelClientOptions): ChannelClient {
   let status: ConnStatus = 'connecting';
 
   const ws = new WS(opts.wsUrl);
+  // Binary wire (S23): receive frames as ArrayBuffer so the binary decoder gets
+  // raw bytes. JSON dev frames still arrive as bytes and decode transparently.
+  ws.binaryType = 'arraybuffer';
 
   function setStatus(next: ConnStatus): void {
     status = next;
@@ -46,10 +49,11 @@ export function createChannelClient(opts: ChannelClientOptions): ChannelClient {
     // Error events generally precede close; rely on close for the status flip.
   });
   ws.addEventListener('message', (ev) => {
-    const data = typeof ev.data === 'string' ? ev.data : String(ev.data);
+    // ev.data is an ArrayBuffer (binary frame) or string (legacy JSON) — the
+    // decoder handles both via the magic byte.
     let msg: ServerMessage;
     try {
-      msg = decodeServerMessage(data);
+      msg = decodeServerMessage(ev.data as ArrayBuffer | string);
     } catch {
       // Malformed; ignore.
       return;

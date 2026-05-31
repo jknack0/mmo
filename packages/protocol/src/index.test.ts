@@ -89,7 +89,12 @@ describe('Protocol round-trip (JSON dev mode)', () => {
         snapshot: {
           tick: 42,
           players: [
-            { id: 'p1', characterId: 'c1', name: 'Alice', pos: { x: 10, y: 12 } },
+            {
+              id: 'p1', characterId: 'c1', name: 'Alice', pos: { x: 10, y: 12 },
+              engagedTargetId: null,
+              spirit: 50, maxSpirit: 100, wrath: 0, maxWrath: 100,
+              hp: 100, maxHp: 100, dead: false,
+            },
           ],
           mobs: [
             {

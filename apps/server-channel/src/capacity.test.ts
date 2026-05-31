@@ -24,7 +24,7 @@ function waitFor(
     const timer = setTimeout(() => reject(new Error('waitFor timed out')), timeoutMs);
     const handler = (data: WebSocket.RawData) => {
       let msg: ServerMessage;
-      try { msg = decodeServerMessage(data.toString()); } catch { return; }
+      try { msg = decodeServerMessage(data as Uint8Array); } catch { return; }
       if (predicate(msg)) {
         clearTimeout(timer);
         ws.off('message', handler);
