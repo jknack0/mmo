@@ -32,3 +32,22 @@ export async function connect(
   if (!res.ok) throw new Error(`gateway /connect failed: ${res.status}`);
   return (await res.json()) as ConnectInfo;
 }
+
+export interface RespawnResult {
+  gold: number;
+  cost: number;
+  zoneId: string;
+}
+
+/** Respawn a downed character: pays the repair cost, returns the safe zone. */
+export async function respawnCharacter(
+  sessionToken: string,
+  characterId: string
+): Promise<RespawnResult> {
+  const res = await fetch(`${GATEWAY_URL}/characters/${characterId}/respawn`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${sessionToken}` },
+  });
+  if (!res.ok) throw new Error(`gateway /respawn failed: ${res.status}`);
+  return (await res.json()) as RespawnResult;
+}

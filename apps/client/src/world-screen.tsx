@@ -4,7 +4,8 @@
 
 import { onMount, onCleanup, createSignal, Show } from 'solid-js';
 import type { Character } from './character-client.js';
-import { connect } from './network/gateway-client.js';
+import { connect, respawnCharacter } from './network/gateway-client.js';
+import { RESPAWN_GOLD_COST } from '@mmo/domain';
 import { mountWorldScene, type LocalPlayerStats, type WorldSceneControls } from './world/world-scene.js';
 import { TripodPanel } from './tripod-panel.js';
 import { PassiveTreePanel } from './passive-tree-panel.js';
@@ -72,6 +73,8 @@ export function WorldScreen(props: WorldScreenProps) {
   const [showVendor, setShowVendor] = createSignal(false);
   const [pickupKey, setPickupKey] = createSignal(0);
   const [zoneName, setZoneName] = createSignal('The Sundered Reaches');
+  const [dead, setDead] = createSignal(false);
+  const [respawning, setRespawning] = createSignal(false);
   let mountEl: HTMLDivElement | undefined;
   let cleanup: (() => void) | null = null;
   let controls: WorldSceneControls | null = null;
@@ -111,9 +114,27 @@ export function WorldScreen(props: WorldScreenProps) {
           transitioning = true;
           void mountZone(target).finally(() => (transitioning = false));
         },
+        onDeath: () => setDead(true),
       });
     } catch (e) {
       setError((e as Error).message);
+    }
+  }
+
+  // Pay the repair cost, then reconnect to the safe town zone.
+  async function onRespawn(): Promise<void> {
+    if (respawning()) return;
+    setRespawning(true);
+    transitioning = true; // suppress the disconnect banner during the swap
+    try {
+      const res = await respawnCharacter(props.sessionToken, props.character.id);
+      setDead(false);
+      await mountZone(res.zoneId);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      transitioning = false;
+      setRespawning(false);
     }
   }
 
@@ -232,6 +253,26 @@ export function WorldScreen(props: WorldScreenProps) {
           onChanged={() => setPickupKey((k) => k + 1)}
           onClose={() => setShowVendor(false)}
         />
+      </Show>
+
+      <Show when={dead()}>
+        <div class="absolute inset-0 z-50 flex flex-col items-center justify-center" style={{ background: 'rgba(6,4,4,.82)' }}>
+          <div class="ts-zone-name" style={{ 'font-size': '40px', color: '#ff5a5a', 'text-shadow': '3px 3px 0 #000' }}>
+            YOU HAVE FALLEN
+          </div>
+          <div class="ts-zone-sub mt-2 mb-6" style={{ color: '#c9a98c' }}>
+            Wake in Hold Veridian · repair cost <span style={{ color: '#ffd24a' }}>{RESPAWN_GOLD_COST} gold</span>
+          </div>
+          <button
+            type="button"
+            class="ts-btn"
+            style={{ 'font-size': '16px', padding: '10px 22px' }}
+            disabled={respawning()}
+            onClick={() => void onRespawn()}
+          >
+            {respawning() ? 'Respawning…' : 'Respawn'}
+          </button>
+        </div>
       </Show>
 
       <Show when={error()}>

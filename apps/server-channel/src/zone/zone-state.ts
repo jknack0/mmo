@@ -50,6 +50,8 @@ export interface ServerPlayer {
   /** Current health (S16). maxHp comes from derivedStats (base + VIT). */
   hp: number;
   maxHp: number;
+  /** Dead state (S18): HP hit 0, frozen until the client respawns in town. */
+  dead: boolean;
 }
 
 export interface ServerMob {
@@ -198,6 +200,7 @@ export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPla
     derivedStats,
     hp: derivedStats.maxHp,
     maxHp: derivedStats.maxHp,
+    dead: false,
   };
   zone.players.set(input.id, player);
   return player;
@@ -438,6 +441,7 @@ function nearestPlayer(zone: ZoneState, pos: Vec2, radius: number): ServerPlayer
   let best: ServerPlayer | undefined;
   let bestDist = radius;
   for (const p of zone.players.values()) {
+    if (p.dead) continue; // mobs ignore corpses (S18)
     const d = Math.hypot(p.pos.x - pos.x, p.pos.y - pos.y);
     if (d <= bestDist) {
       best = p;
@@ -447,9 +451,13 @@ function nearestPlayer(zone: ZoneState, pos: Vec2, radius: number): ServerPlayer
   return best;
 }
 
-function respawnPlayer(zone: ZoneState, player: ServerPlayer): void {
-  player.hp = player.maxHp;
-  player.pos = { x: Math.floor(zone.size.x / 2), y: Math.floor(zone.size.y / 2) };
+/**
+ * Down a player (S18): freeze them as a corpse. Respawn relocates to town via a
+ * fresh channel connection (the client reconnects), so we don't revive in place.
+ */
+function killPlayer(player: ServerPlayer): void {
+  player.hp = 0;
+  player.dead = true;
   player.target = null;
   player.attackState = { kind: 'idle' };
 }
@@ -491,7 +499,7 @@ export function stepMobAggro(zone: ZoneState, dtSec: number, nowMs: number): Mob
     let fatal = false;
     if (target.hp <= 0) {
       fatal = true;
-      respawnPlayer(zone, target);
+      killPlayer(target);
     }
     hits.push({ playerId: target.id, mobId: mob.id, amount: MOB_CONTACT_DAMAGE, fatal });
   }
@@ -569,6 +577,7 @@ export function snapshotZone(zone: ZoneState): ZoneSnapshot {
       maxWrath: p.resources.maxWrath,
       hp: p.hp,
       maxHp: p.maxHp,
+      dead: p.dead,
     });
   }
   const mobs: MobState[] = [];

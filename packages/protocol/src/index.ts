@@ -30,6 +30,8 @@ export interface PlayerState {
   /** Current health (S16 pulls player HP forward). */
   hp: number;
   maxHp: number;
+  /** Dead state (S18): HP hit 0, awaiting respawn. Replicated to all clients. */
+  dead: boolean;
 }
 
 export interface MobState {
