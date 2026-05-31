@@ -87,6 +87,7 @@ const MOB_SHEETS: Record<string, MobRender> = {
   'skeleton-lord': { sheet: 'mob_skeleton_base.png', scale: 2.6 }, // brute (Rift boss)
   ghoul: { sheet: 'mob_ghoul.png', scale: 2 },
   bonecaster: { sheet: 'mob_bonecaster_8dir.png', scale: 2 },
+  cinderbat: { sheet: 'mob_cinderbat_fly_s.png', scale: 2 }, // flyer (front-facing flap)
 };
 
 /** Sheet + scale for a mob kind; unknown kinds fall back to the skeleton. */

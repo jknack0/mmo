@@ -15,3 +15,8 @@ playwright-report/
 
 # Coverage reports (S27)
 coverage/
+
+# Art-skill Python venv (sundered-sprites)
+.claude/skills/**/.venv/
+__pycache__/
+*.pyc
