@@ -36,10 +36,13 @@ export interface EquippedTable {
   item_id: string;
 }
 
-/** Minimal characters view the channel touches (S20 Rift reward materials). */
+/** Minimal characters view the channel touches (S20 Rift reward materials,
+ *  S22 session snapshot for crash recovery). */
 export interface CharactersTable {
   id: Generated<string>;
   materials: Generated<number>;
+  /** Last-flushed session state (S22, ADR-0013): zone, position, HP. */
+  snapshot_state: JSONColumnType<Record<string, unknown>> | null;
 }
 
 export interface ChannelDatabase {

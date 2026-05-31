@@ -35,6 +35,7 @@ import { stepResources } from './resources/resource-system.js';
 import { loadTripods } from './persistence/tripod-store.js';
 import { loadPassives } from './persistence/passive-store.js';
 import { createChannelItemRepo, type ChannelItemRepo } from './persistence/item-repo.js';
+import { createSnapshotRepo, buildSnapshotState, type SnapshotRepo } from './persistence/snapshot-repo.js';
 import { heartbeatChannel, deregisterChannel, type ChannelIdentity } from './persistence/channel-registry.js';
 import type { ChannelDatabase } from './db/types.js';
 
@@ -67,6 +68,8 @@ export interface ChannelServerOptions {
   capacity?: number;
   /** Heartbeat interval ms (load → routing table). Default 5000. */
   heartbeatMs?: number;
+  /** SnapshotWorker flush interval ms (S22). Default 30000. Needs `db`. */
+  snapshotMs?: number;
 }
 
 /** Tiles a player must be within to grab a ground item. */
@@ -105,7 +108,26 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
   }
 
   const itemRepo: ChannelItemRepo | null = opts.db ? createChannelItemRepo(opts.db) : null;
+  const snapshotRepo: SnapshotRepo | null = opts.db ? createSnapshotRepo(opts.db) : null;
+  const snapshotMs = opts.snapshotMs ?? 30_000;
   const connections = new Map<WebSocket, Connection>();
+
+  // SnapshotWorker (S22, ADR-0013): flush a connection's volatile session state
+  // (zone + position + HP) to Postgres. Fire-and-forget so the tick loop and
+  // the ws-close path never block on the write.
+  function flushSnapshot(conn: Connection): void {
+    if (!snapshotRepo || stopping || !conn.playerId || !conn.characterId) return;
+    const player = zone.players.get(conn.playerId);
+    if (!player) return;
+    const state = buildSnapshotState(player, opts.zoneId ?? '', Date.now());
+    void snapshotRepo
+      .write(conn.characterId, state)
+      .catch((err) => console.error('[channel] snapshot write failed:', err));
+  }
+  function flushAllSnapshots(): void {
+    if (!snapshotRepo) return;
+    for (const conn of connections.values()) flushSnapshot(conn);
+  }
 
   // Routing self-registration is enabled only when a channelId is configured
   // (the standalone test servers omit it and stay off the routing table).
@@ -128,6 +150,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
   let wss: WebSocketServer | null = null;
   let tickHandle: NodeJS.Timeout | null = null;
   let heartbeatHandle: NodeJS.Timeout | null = null;
+  let snapshotHandle: NodeJS.Timeout | null = null;
   let stopping = false;
 
   /** Players currently authenticated on this channel (drives load + capacity). */
@@ -194,11 +217,19 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       // (Postgres) so S09/S10/S13 selections take effect from the first cast.
       // equippedPyroSkillCount defaults to the full 6-of-6 Pyro hotbar at
       // alpha (drives Annihilator).
-      const [tripods, passives, equipped] = await Promise.all([
+      const [tripods, passives, equipped, snapshot] = await Promise.all([
         loadTripods(opts.redis, msg.characterId),
         loadPassives(opts.redis, msg.characterId),
         itemRepo ? itemRepo.equippedInstances(msg.characterId) : Promise.resolve([]),
+        snapshotRepo ? snapshotRepo.read(msg.characterId) : Promise.resolve(null),
       ]);
+      // Crash recovery (S22): if the last snapshot was in THIS zone and the
+      // player wasn't dead, respawn them at their saved position + HP. A
+      // cross-zone or dead snapshot is ignored — they spawn fresh.
+      const restore =
+        snapshot && snapshot.zoneId === (opts.zoneId ?? '') && !snapshot.dead
+          ? snapshot
+          : null;
       spawnPlayer(zone, {
         id: playerId,
         characterId: msg.characterId,
@@ -206,6 +237,8 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         tripods,
         passives,
         itemStats: aggregateEquipped(equipped),
+        pos: restore ? { x: restore.pos.x, y: restore.pos.y } : undefined,
+        hp: restore ? restore.hp : undefined,
       });
       send(ws, {
         type: 'welcome',
@@ -372,6 +405,8 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         const p = portalAt(portals, player.pos);
         if (p && conn.onPortalId !== p.id) {
           conn.onPortalId = p.id;
+          // Flush before the handoff so the target zone restores fresh state (S22).
+          flushSnapshot(conn);
           send(conn.ws, { type: 'zone-transition', zoneId: p.targetZoneId });
         } else if (!p) {
           conn.onPortalId = null;
@@ -396,6 +431,10 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
             publishHeartbeat();
             heartbeatHandle = setInterval(publishHeartbeat, heartbeatMs);
           }
+          // SnapshotWorker: periodic flush of all live players (S22).
+          if (snapshotRepo) {
+            snapshotHandle = setInterval(flushAllSnapshots, snapshotMs);
+          }
           resolve();
         });
         wss.on('error', reject);
@@ -410,6 +449,9 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
           });
 
           ws.on('close', () => {
+            // Snapshot the final state on clean logout BEFORE despawn removes
+            // the player from the zone (S22).
+            flushSnapshot(conn);
             connections.delete(ws);
             if (conn.playerId) {
               despawnPlayer(zone, conn.playerId);
@@ -434,6 +476,10 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         if (heartbeatHandle) {
           clearInterval(heartbeatHandle);
           heartbeatHandle = null;
+        }
+        if (snapshotHandle) {
+          clearInterval(snapshotHandle);
+          snapshotHandle = null;
         }
         if (identity) {
           deregisterChannel(opts.redis, identity).catch(() => {});

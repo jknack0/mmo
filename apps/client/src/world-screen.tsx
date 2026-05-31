@@ -121,7 +121,13 @@ export function WorldScreen(props: WorldScreenProps) {
         characterId: info.character.id,
         characterName: info.character.name,
         onDisconnected: () => {
-          if (!transitioning) setError('Disconnected from channel.');
+          // A genuine disconnect (channel crash) rolls the player back to their
+          // last snapshot — kick them to character-select to re-enter (S22).
+          // Zone transitions set `transitioning` and are exempt.
+          if (!transitioning) {
+            setError('Lost connection to the channel — returning to character select.');
+            props.onLeave();
+          }
         },
         onStats: setStats,
         onPickup: () => setPickupKey((k) => k + 1),
