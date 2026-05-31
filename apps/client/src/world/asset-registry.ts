@@ -28,6 +28,8 @@ export interface MobFrames {
   fps?: number;
   /** True when frames are the 8 facings (skeleton/ghoul/bonecaster). */
   directional: boolean;
+  /** Sheet metadata so the renderer can drive clipFrameIndex (idle/move/attack). */
+  meta?: SheetMeta;
 }
 
 export interface AssetRegistry {
@@ -107,6 +109,7 @@ export async function loadAssetRegistry(): Promise<AssetRegistry> {
         anchor: m?.anchor ?? [0.5, 0.95],
         fps: m?.fps,
         directional: m ? isDirectionalSheet(m) : false,
+        meta: m,
       };
     },
     icon(name) {
