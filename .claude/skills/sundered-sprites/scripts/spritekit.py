@@ -72,6 +72,9 @@ def roles(pal):
 
 T = (0, 0, 0, 0)  # transparent
 
+# Canonical 8-direction frame order. sw/w/nw are horizontal mirrors of se/e/ne.
+DIR_FRAMES = ["e", "se", "s", "sw", "w", "nw", "n", "ne"]
+
 # ------------------------------------------------------------------- grid ----
 class Grid:
     """A native-resolution RGBA pixel grid. 1 cell = 1 art pixel."""
@@ -161,6 +164,22 @@ def save_strip(frames, path):
     strip.save(path)
     return strip
 
+def save_sheet(rows, path):
+    """rows: list of rows, each a list of equally-sized PIL frames -> one 2D
+    transparent PNG. Cell (r,c) lands at (c*w, r*h). Short rows are left-padded
+    with transparency so every row spans the widest row's column count.
+    This is the layout the engine's clip model expects: rows = state-blocks of
+    8 facings, columns = frames."""
+    w, h = rows[0][0].size
+    cols = max(len(r) for r in rows)
+    sheet = Image.new("RGBA", (w * cols, h * len(rows)), T)
+    for r, frames in enumerate(rows):
+        for c, f in enumerate(frames):
+            sheet.paste(f, (c * w, r * h))
+    sheet.save(path)
+    return sheet
+
+
 def save_preview(strip, path, scale=12, bg="#0d0d12"):
     w, h = strip.size
     out = Image.new("RGBA", (w * scale, h * scale), rgba(bg))
@@ -198,6 +217,28 @@ def manifest_entry(cols, cellW, cellH, frames, anchor, render_scale=2, fps=None,
         e["fps"] = fps
     e["note"] = note
     return e
+
+def clip_manifest_entry(cellW, cellH, anchor, clips, render_scale=2, note=""):
+    """Manifest entry for a multi-row clip sheet (idle/move/attack).
+
+    clips: ordered dict-like {state: {"frames": n, "fps": f}} in row order
+    (idle, then move, then attack). Each state occupies an 8-facing block of
+    rows; this assigns row = i*8 automatically. cols = widest clip; rows = 8 per
+    clip. Frame names stay the 8 facings for reference. The renderer reads
+    `clips[state] = {frames, fps, row}` and indexes (row+facing)*cols + frame.
+    """
+    states = list(clips.keys())
+    cols = max(c["frames"] for c in clips.values())
+    out_clips = {}
+    for i, state in enumerate(states):
+        c = clips[state]
+        out_clips[state] = {"frames": c["frames"], "fps": c["fps"], "row": i * 8}
+    return {
+        "cols": cols, "rows": len(states) * 8, "cellW": cellW, "cellH": cellH,
+        "frames": list(DIR_FRAMES), "anchor": list(anchor),
+        "renderScale": render_scale, "clips": out_clips, "note": note,
+    }
+
 
 def upsert_manifest(manifest_path, sheet_name, entry):
     """Add/replace one sheet entry in spritesheet_map.json, preserving the rest."""

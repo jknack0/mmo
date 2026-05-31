@@ -10,6 +10,7 @@ import {
   frameRects,
   frameIndex,
   mobRender,
+  isDirectionalSheet,
   PLAYER_SHEET,
   ICON_SHEET,
   type SheetMeta,
@@ -23,6 +24,12 @@ export interface MobFrames {
   frames: Texture[];
   scale: number;
   anchor: [number, number];
+  /** Loop rate for a time-animated sheet (cinderbat flap, cyclops breathe). */
+  fps?: number;
+  /** True when frames are the 8 facings (skeleton/ghoul/bonecaster). */
+  directional: boolean;
+  /** Sheet metadata so the renderer can drive clipFrameIndex (idle/move/attack). */
+  meta?: SheetMeta;
 }
 
 export interface AssetRegistry {
@@ -96,7 +103,14 @@ export async function loadAssetRegistry(): Promise<AssetRegistry> {
     mobFrames(kind) {
       const r = mobRender(kind);
       const m = manifest.sheets[r.sheet];
-      return { frames: frames(r.sheet), scale: r.scale, anchor: m?.anchor ?? [0.5, 0.95] };
+      return {
+        frames: frames(r.sheet),
+        scale: r.scale,
+        anchor: m?.anchor ?? [0.5, 0.95],
+        fps: m?.fps,
+        directional: m ? isDirectionalSheet(m) : false,
+        meta: m,
+      };
     },
     icon(name) {
       const m = manifest.sheets[ICON_SHEET];

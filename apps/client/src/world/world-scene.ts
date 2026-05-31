@@ -14,7 +14,14 @@ import {
 import type { ServerMessage, Vec2, GroundItem } from '@mmo/protocol';
 import { createSnapshotReconstructor } from '@mmo/protocol';
 import { loadAssetRegistry } from './asset-registry.js';
-import { PLAYER_SHEET, FACING_SOUTH } from './asset-manifest.js';
+import {
+  PLAYER_SHEET,
+  FACING_SOUTH,
+  clipFrameIndex,
+  type ClipState,
+  type SheetMeta,
+} from './asset-manifest.js';
+import type { Texture } from 'pixi.js';
 import { getItemBase, RARITY_COLOR, type Rarity } from '@mmo/domain';
 import { createChannelClient, type ChannelClient } from '../network/channel-client.js';
 import {
@@ -110,6 +117,43 @@ export async function mountWorldScene(
     const sdy = (dx + dy) * (ISO_TILE_H / 2);
     const deg = (Math.atan2(sdy, sdx) * 180) / Math.PI;
     return ((Math.round(deg / 45) % 8) + 8) % 8;
+  }
+
+  // ─── Per-actor animation (S-anim) ──────────────────────────────
+  // Any sprite that walks/idles carries its sliced sheet + a clip cursor.
+  // The clip model lives in asset-manifest (clipFrameIndex); the renderer just
+  // advances time and picks the texture. Legacy sheets (no clips) collapse to a
+  // static facing frame, so un-reauthored actors render exactly as before.
+  const MOVE_EPS = 0.003; // tile-space delta below which an actor is "standing still"
+  interface AnimActor {
+    body: Sprite;
+    frames: Texture[];
+    meta?: SheetMeta;
+    facing: number;
+    state: ClipState;
+    clipElapsed: number; // ms into the current clip (reset on state change)
+    lastPos: Vec2;
+  }
+
+  /** Advance an actor's clip by `dtMs`, pick facing from motion, set its frame. */
+  function animateActor(a: AnimActor, pos: Vec2, dtMs: number): void {
+    const ddx = pos.x - a.lastPos.x;
+    const ddy = pos.y - a.lastPos.y;
+    const moving = Math.abs(ddx) + Math.abs(ddy) > MOVE_EPS;
+    if (moving) a.facing = facingFromDelta(ddx, ddy); // hold facing when still
+    const next: ClipState = moving ? 'move' : 'idle';
+    if (next !== a.state) {
+      a.state = next;
+      a.clipElapsed = 0;
+    } else {
+      a.clipElapsed += dtMs;
+    }
+    a.lastPos = { x: pos.x, y: pos.y };
+    if (a.frames.length === 0) return;
+    const idx = a.meta
+      ? clipFrameIndex(a.meta, a.state, a.facing, a.clipElapsed)
+      : Math.min(a.facing, a.frames.length - 1); // no manifest meta → best-effort facing
+    a.body.texture = a.frames[idx] ?? a.frames[0]!;
   }
 
   const world = new Container();
@@ -285,16 +329,12 @@ export async function mountWorldScene(
   }
 
   // ─── Sprite entries ────────────────────────────────────────────
-  interface PlayerSpriteEntry {
+  interface PlayerSpriteEntry extends AnimActor {
     container: Container;
-    body: Sprite;
-    facing: number;
-    lastPos: Vec2;
   }
-  interface MobSpriteEntry {
+  interface MobSpriteEntry extends AnimActor {
     container: Container;
     hpBar: Graphics;
-    body: Sprite;
     /** Yellow target ring drawn underfoot when the local player is sticky-targeting this mob. */
     targetRing: Graphics;
   }
@@ -370,7 +410,10 @@ export async function mountWorldScene(
     label.anchor.set(0.5, 1);
     label.y = -46;
     container.addChild(feet, body, label);
-    return { container, body, facing: SOUTH, lastPos: { x: 0, y: 0 } };
+    return {
+      container, body, frames: HERO_FRAMES, meta: heroMeta,
+      facing: SOUTH, state: 'idle', clipElapsed: 0, lastPos: { x: 0, y: 0 },
+    };
   }
 
   function makeMobSprite(kind: string): MobSpriteEntry {
@@ -395,7 +438,10 @@ export async function mountWorldScene(
     const hpBar = new Graphics();
     hpBar.y = -42;
     container.addChild(targetRing, feet, body, label, hpBar);
-    return { container, hpBar, body, targetRing };
+    return {
+      container, hpBar, body, targetRing, frames: mf.frames, meta: mf.meta,
+      facing: SOUTH, state: 'idle', clipElapsed: 0, lastPos: { x: 0, y: 0 },
+    };
   }
 
   function drawTargetRing(ring: Graphics): void {
@@ -680,17 +726,8 @@ export async function mountWorldScene(
       entry.container.y = s.y;
       entry.container.zIndex = p.pos.y;
       entry.container.alpha = p.dead ? 0.3 : 1; // corpses fade (S18)
-      // Face the direction of travel; hold facing when standing still.
-      const ddx = p.pos.x - entry.lastPos.x;
-      const ddy = p.pos.y - entry.lastPos.y;
-      if (Math.abs(ddx) + Math.abs(ddy) > 0.003) {
-        const idx = facingFromDelta(ddx, ddy);
-        if (idx !== entry.facing) {
-          entry.facing = idx;
-          entry.body.texture = HERO_FRAMES[idx] ?? HERO_FRAMES[0]!;
-        }
-      }
-      entry.lastPos = { x: p.pos.x, y: p.pos.y };
+      // Drive the walk/idle clip + facing from travel (S-anim).
+      animateActor(entry, p.pos, ticker.deltaMS);
     }
     for (const [id, entry] of playerSprites) {
       if (!seenP.has(id)) {
@@ -723,6 +760,8 @@ export async function mountWorldScene(
       entry.container.x = s.x;
       entry.container.y = s.y;
       entry.container.alpha = m.alive ? 1 : 0.25;
+      // Walk/idle clip + facing for mobs (S-anim) — corpses freeze on last frame.
+      if (m.alive) animateActor(entry, m.pos, ticker.deltaMS);
       drawHpBar(entry.hpBar, m.hp, m.maxHp, 36);
       const targeted = m.id === myEngagedId && m.alive;
       entry.targetRing.visible = targeted;
