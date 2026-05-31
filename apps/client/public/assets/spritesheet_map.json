@@ -165,6 +165,23 @@
       "renderScale": 2,
       "fps": 9,
       "note": "flying undead trash mob, front (s) facing, 4-frame wing-flap."
+    },
+    "boss_cyclops_s.png": {
+      "cols": 2,
+      "rows": 1,
+      "cellW": 24,
+      "cellH": 28,
+      "frames": [
+        "idle_a",
+        "idle_b"
+      ],
+      "anchor": [
+        0.5,
+        0.95
+      ],
+      "renderScale": 2,
+      "fps": 3,
+      "note": "cyclops boss \u2014 one-eyed stone giant, front (s) facing, 2-frame idle breathe."
     }
   },
   "procedural": {
