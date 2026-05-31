@@ -15,7 +15,7 @@ import {
   type HandledFrame,
   type ZoneSnapshot,
 } from '@mmo/protocol';
-import { rollItemDrop, aggregateEquipped, rarityOf, getZoneDef, portalAt } from '@mmo/domain';
+import { rollItemDrop, rollGuaranteedDrop, aggregateEquipped, rarityOf, getZoneDef, portalAt } from '@mmo/domain';
 import type { WorldNpc, WorldPortal } from '@mmo/protocol';
 import {
   createZoneState,
@@ -420,7 +420,11 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
     const mob = zone.mobs.get(mobId);
     if (!mob) return;
     const magicFind = zone.players.get(killerId)?.derivedStats.magicFind ?? 0;
-    const drop = rollItemDrop(mob.kind, Math.random, magicFind);
+    // CHANNEL_FORCE_DROP forces a guaranteed drop — deterministic loot for the
+    // S26 e2e (never set in production).
+    const drop = process.env.CHANNEL_FORCE_DROP === '1'
+      ? rollGuaranteedDrop(mob.kind, Math.random, magicFind)
+      : rollItemDrop(mob.kind, Math.random, magicFind);
     if (!drop) return;
     const pos = { ...mob.pos };
     const rarity = rarityOf(drop.baseId, drop.affixes.length);

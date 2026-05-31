@@ -55,6 +55,17 @@ export interface MountWorldSceneOptions {
 export interface WorldSceneControls {
   /** Send a use-item (consume) request to the channel for the given item. */
   useItem: (itemId: string) => void;
+  /** Walk toward a tile (S26 e2e driver — deterministic, no canvas clicks). */
+  move: (target: Vec2) => void;
+  /** Engage a mob with a skill (S26 e2e driver). */
+  attack: (mobId: string, skillId: string) => void;
+  /** Snapshot the live world for assertions (S26 e2e driver). */
+  getState: () => {
+    myId: string | null;
+    me: { pos: Vec2; hp: number } | null;
+    mobs: Array<{ id: string; pos: Vec2; hp: number; alive: boolean }>;
+    ground: Array<{ id: string; baseId: string; pos: Vec2 }>;
+  };
 }
 
 export interface LocalPlayerStats {
@@ -503,6 +514,17 @@ export async function mountWorldScene(
   // (the inventory's "Use" button sends a consume request over the channel).
   opts.onControls?.({
     useItem: (itemId: string) => client.send({ type: 'use-item', itemId }),
+    move: (target: Vec2) => client.send({ type: 'move', target }),
+    attack: (mobId: string, skillId: string) => client.send({ type: 'attack', targetId: mobId, skillId }),
+    getState: () => {
+      const me = lastFrame.players.find((p) => p.id === myId);
+      return {
+        myId,
+        me: me ? { pos: { x: me.pos.x, y: me.pos.y }, hp: me.hp } : null,
+        mobs: lastFrame.mobs.map((m) => ({ id: m.id, pos: { x: m.pos.x, y: m.pos.y }, hp: m.hp, alive: m.alive })),
+        ground: latestGroundItems.map((g) => ({ id: g.id, baseId: g.baseId, pos: { x: g.pos.x, y: g.pos.y } })),
+      };
+    },
   });
 
   const unsubMsg = client.onMessage(handleServerMessage);
