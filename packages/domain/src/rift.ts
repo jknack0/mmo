@@ -6,6 +6,7 @@
 // machine + the spawn definitions; the channel hosts the live instance.
 
 import { ASHEN_PLAINS } from './zones.js';
+import { rollGuaranteedDrop, type ItemDrop } from './drop-table.js';
 
 export const RIFT_T1_ZONE_ID = 'rift-t1';
 
@@ -58,6 +59,29 @@ export function riftComplete(state: RiftState): boolean {
 
 /** Where a finished (or abandoned) Rift returns the player. */
 export const RIFT_EXIT_ZONE_ID = 'hold-veridian';
+
+// ─── Run rules + reward (S20 #22, ADR-0008/0007) ──────────────
+
+/** Deaths that fail a Rift run (party-wide). */
+export const MAX_RIFT_DEATHS = 3;
+
+/** Materials granted on a successful boss kill (tapping-input placeholder). */
+export const RIFT_REWARD_MATERIALS = 50;
+
+/** Magic Find applied to the guaranteed boss reward (richer than trash drops). */
+export const RIFT_REWARD_MAGIC_FIND = 100;
+
+export type RiftDeathOutcome = 'revive' | 'fail';
+
+/** Outcome of a death in a Rift: revive in-place, or fail the run at the cap. */
+export function riftDeathOutcome(deathsAfter: number): RiftDeathOutcome {
+  return deathsAfter >= MAX_RIFT_DEATHS ? 'fail' : 'revive';
+}
+
+/** Roll the guaranteed boss reward item (rarity per S14, MF-boosted). */
+export function rollRiftReward(rng: () => number): ItemDrop {
+  return rollGuaranteedDrop(RIFT_TRASH.kind, rng, RIFT_REWARD_MAGIC_FIND);
+}
 
 /** Sanity re-export so callers don't hardcode the open-zone id elsewhere. */
 export const RIFT_OPEN_ZONE_ID = ASHEN_PLAINS;

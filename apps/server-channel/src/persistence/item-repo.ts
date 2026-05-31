@@ -7,9 +7,9 @@
 // tested against Postgres); kept local to avoid a cross-app import, per the
 // established per-app store pattern (tripod-store / passive-store).
 
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import type { ChannelDatabase } from '../db/types.js';
-import { getConsumable, type RolledAffix } from '@mmo/domain';
+import { getConsumable, rollRiftReward, RIFT_REWARD_MATERIALS, type RolledAffix } from '@mmo/domain';
 
 export interface ChannelEquippedInstance {
   baseId: string;
@@ -35,6 +35,15 @@ export interface ChannelItemRepo {
     accountId: string | null,
     itemId: string
   ): Promise<{ baseId: string; heal: number } | null>;
+  /**
+   * Grant the guaranteed Rift boss reward (S20): mint a rarity-rolled item into
+   * the bag, top up materials, and append a `rift-reward` audit row — one txn.
+   */
+  grantRiftReward(
+    characterId: string,
+    accountId: string | null,
+    rng?: () => number
+  ): Promise<{ baseId: string; materials: number }>;
 }
 
 function firstFreeSlot(used: number[]): number {
@@ -111,6 +120,41 @@ export function createChannelItemRepo(db: Kysely<ChannelDatabase>): ChannelItemR
           })
           .execute();
         return { baseId: row.baseId, heal: consumable.heal };
+      });
+    },
+
+    async grantRiftReward(characterId, accountId, rng = Math.random) {
+      const reward = rollRiftReward(rng);
+      return db.transaction().execute(async (trx) => {
+        const item = await trx
+          .insertInto('items')
+          .values({ base_id: reward.baseId, owner_character_id: characterId, affixes: JSON.stringify(reward.affixes) })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        const rows = await trx
+          .selectFrom('inventory')
+          .select('slot')
+          .where('character_id', '=', characterId)
+          .execute();
+        await trx
+          .insertInto('inventory')
+          .values({ character_id: characterId, slot: firstFreeSlot(rows.map((r) => r.slot)), item_id: item.id })
+          .execute();
+        await trx
+          .updateTable('characters')
+          .set({ materials: sql`materials + ${RIFT_REWARD_MATERIALS}` })
+          .where('id', '=', characterId)
+          .execute();
+        await trx
+          .insertInto('audit_log')
+          .values({
+            account_id: accountId,
+            character_id: characterId,
+            action: 'rift-reward',
+            detail: JSON.stringify({ baseId: reward.baseId, affixes: reward.affixes.length, materials: RIFT_REWARD_MATERIALS }),
+          })
+          .execute();
+        return { baseId: reward.baseId, materials: RIFT_REWARD_MATERIALS };
       });
     },
   };

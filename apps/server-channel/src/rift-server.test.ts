@@ -136,4 +136,29 @@ describe('RiftServer (S19)', () => {
     expect([...inst.zone.mobs.values()].some((m) => m.id === inst.bossId)).toBe(true);
     ws.close();
   });
+
+  it('banks a death and revives the player below the cap (S20)', async () => {
+    const ws = await connect();
+    const wp = waitFor(ws, 'welcome');
+    hello(ws, await session('d1'), 'cd', 'D');
+    const w = await wp;
+    const id = w.type === 'welcome' ? w.instanceId : '';
+    const inst = server.instances().get(id)!;
+    const me = inst.zone.players.get(w.type === 'welcome' ? w.you : '')!;
+
+    // Set the player to 1 HP and stand them on a trash mob so the next bite is lethal.
+    me.hp = 1;
+    const mob = [...inst.zone.mobs.values()][0]!;
+    me.pos = { ...mob.pos };
+
+    const start = Date.now();
+    while (inst.deaths < 1 && Date.now() - start < 4000) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(inst.deaths).toBe(1);
+    // Below the cap → revived (alive again, not done).
+    expect(inst.zone.players.get(w.type === 'welcome' ? w.you : '')!.dead).toBe(false);
+    expect(inst.done).toBe(false);
+    ws.close();
+  });
 });
