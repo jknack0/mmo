@@ -85,14 +85,23 @@ describe('stepMobAggro (S16)', () => {
     expect(p.hp).toBe(100 - 2 * MOB_CONTACT_DAMAGE);
   });
 
-  it('lethal contact respawns the player at full HP and reports fatal', () => {
+  it('lethal contact downs the player (dead, hp 0) and reports fatal', () => {
     const z = zone();
     const p = spawnPlayer(z, { id: 'p1', characterId: 'c1', name: 'A', pos: { x: 10, y: 10 } });
     p.hp = 4;
     spawnMob(z, { id: 'm1', kind: 'skeleton', pos: { x: 10.2, y: 10 }, maxHp: 50 });
     const hits = stepMobAggro(z, 0.1, 1000);
     expect(hits[0]!.fatal).toBe(true);
-    expect(p.hp).toBe(p.maxHp); // respawned full
+    expect(p.dead).toBe(true);
+    expect(p.hp).toBe(0);
+  });
+
+  it('mobs ignore a corpse (no further bites once dead)', () => {
+    const z = zone();
+    const p = spawnPlayer(z, { id: 'p1', characterId: 'c1', name: 'A', pos: { x: 10, y: 10 } });
+    p.dead = true;
+    spawnMob(z, { id: 'm1', kind: 'skeleton', pos: { x: 10.2, y: 10 }, maxHp: 50 });
+    expect(stepMobAggro(z, 0.1, 1000)).toHaveLength(0);
   });
 
   it('a mob that chases in from range eventually bites (no boundary asymptote)', () => {

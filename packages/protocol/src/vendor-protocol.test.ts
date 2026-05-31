@@ -46,6 +46,7 @@ describe('player hp/maxHp on snapshot', () => {
           maxWrath: 100,
           hp: 80,
           maxHp: 150,
+          dead: true,
         },
       ],
       mobs: [],
@@ -55,5 +56,6 @@ describe('player hp/maxHp on snapshot', () => {
     if (decoded.type !== 'snapshot') throw new Error('expected snapshot');
     expect(decoded.snapshot.players[0].hp).toBe(80);
     expect(decoded.snapshot.players[0].maxHp).toBe(150);
+    expect(decoded.snapshot.players[0].dead).toBe(true);
   });
 });

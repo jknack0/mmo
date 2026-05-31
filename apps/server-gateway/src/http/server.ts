@@ -17,6 +17,7 @@ import {
 import type { InventoryRepo } from '../inventory/inventory-repo.js';
 import type { TappingService } from '../tapping/tapping-service.js';
 import type { VendorService } from '../vendor/vendor-service.js';
+import type { RespawnService } from '../respawn/respawn-service.js';
 import type { ChannelRouter } from '../channel-router/channel-router.js';
 import {
   getItemBase,
@@ -33,6 +34,8 @@ export interface GatewayServerOptions {
   inventory: InventoryRepo;
   tapping: TappingService;
   vendor: VendorService;
+  /** Respawn economy (S18). Optional so legacy test harnesses can omit it. */
+  respawn?: RespawnService;
   /** ChannelRouter (S04). When present, /connect routes by zone + capacity. */
   router?: ChannelRouter;
   /** Origin the client SPA is served from. Discord callback redirects here. */
@@ -68,6 +71,7 @@ const UNEQUIP_PATH = /^\/characters\/([0-9a-f-]{36})\/unequip$/;
 const TAP_PATH = /^\/characters\/([0-9a-f-]{36})\/items\/([0-9a-f-]{36})\/tap$/;
 const VENDOR_BUY_PATH = /^\/characters\/([0-9a-f-]{36})\/vendor\/buy$/;
 const VENDOR_SELL_PATH = /^\/characters\/([0-9a-f-]{36})\/vendor\/sell$/;
+const RESPAWN_PATH = /^\/characters\/([0-9a-f-]{36})\/respawn$/;
 
 function setCors(res: ServerResponse, origin: string): void {
   res.setHeader('Access-Control-Allow-Origin', origin);
@@ -97,7 +101,7 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 }
 
 export function buildGatewayServer(opts: GatewayServerOptions): Server {
-  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping, vendor, router } = opts;
+  const { auth, characters, clientOrigin, channelWsUrl, redis, inventory, tapping, vendor, router, respawn } = opts;
 
   // Snapshot the inventory view a vendor trade returns: refreshed carried items,
   // gold, and materials so the client re-renders in one round trip.
@@ -410,6 +414,26 @@ export function buildGatewayServer(opts: GatewayServerOptions): Server {
           pityCounter: result.pityCounter,
           materials: result.materials,
         });
+        return;
+      }
+
+      // ─── POST /characters/:id/respawn ─────────────────────────
+      const respawnMatch = RESPAWN_PATH.exec(url.pathname);
+      if (respawnMatch && req.method === 'POST') {
+        const session = await requireAccount(req, res, auth);
+        if (!session) return;
+        if (!respawn) {
+          sendJson(res, 503, { error: 'respawn-unavailable' });
+          return;
+        }
+        const characterId = respawnMatch[1]!;
+        const character = await characters.loadCharacter(session.accountId, characterId);
+        if (!character) {
+          sendJson(res, 404, { error: 'character-not-found' });
+          return;
+        }
+        const result = await respawn.respawn(characterId, session.accountId);
+        sendJson(res, 200, result);
         return;
       }
 

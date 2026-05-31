@@ -21,3 +21,5 @@ export * from './refinement.js';
 export * from './consumables.js';
 // S17 (#19): zone definitions + portals + NPCs.
 export * from './zones.js';
+// S18 (#20): death + respawn economy.
+export * from './respawn.js';

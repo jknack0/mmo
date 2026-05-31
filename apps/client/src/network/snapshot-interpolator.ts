@@ -16,6 +16,7 @@ export interface InterpolatedPlayerState {
   maxWrath: number;
   hp: number;
   maxHp: number;
+  dead: boolean;
 }
 
 export interface InterpolatedMobState {
@@ -56,6 +57,7 @@ interface TrackedPlayer {
   maxWrath: number;
   hp: number;
   maxHp: number;
+  dead: boolean;
 }
 
 interface TrackedMob {
@@ -89,6 +91,7 @@ export function createSnapshotInterpolator(
           existing.maxWrath = p.maxWrath ?? existing.maxWrath;
           existing.hp = p.hp ?? existing.hp;
           existing.maxHp = p.maxHp ?? existing.maxHp;
+          existing.dead = p.dead ?? false;
         } else {
           players.set(p.id, {
             characterId: p.characterId,
@@ -102,6 +105,7 @@ export function createSnapshotInterpolator(
             maxWrath: p.maxWrath ?? 100,
             hp: p.hp ?? 100,
             maxHp: p.maxHp ?? 100,
+            dead: p.dead ?? false,
           });
         }
       }
@@ -150,6 +154,7 @@ export function createSnapshotInterpolator(
           maxWrath: t.maxWrath,
           hp: t.hp,
           maxHp: t.maxHp,
+          dead: t.dead,
         });
       }
       const outMobs: InterpolatedMobState[] = [];

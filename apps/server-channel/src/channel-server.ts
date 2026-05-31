@@ -220,6 +220,10 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       return;
     }
 
+    // A downed player (S18) is frozen — they take no in-world actions until they
+    // respawn in town (which reconnects them to that channel).
+    if (zone.players.get(conn.playerId)?.dead) return;
+
     switch (msg.type) {
       case 'move':
         setPlayerTarget(zone, conn.playerId, msg.target);
@@ -363,7 +367,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       for (const conn of connections.values()) {
         if (!conn.playerId) continue;
         const player = zone.players.get(conn.playerId);
-        if (!player) continue;
+        if (!player || player.dead) continue;
         const p = portalAt(portals, player.pos);
         if (p && conn.onPortalId !== p.id) {
           conn.onPortalId = p.id;

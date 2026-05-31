@@ -40,6 +40,8 @@ export interface MountWorldSceneOptions {
   onControls?: (controls: WorldSceneControls) => void;
   /** Player stepped on a portal — the parent reconnects to the target zone. */
   onZoneTransition?: (zoneId: string) => void;
+  /** Local player's HP hit 0 — the parent shows the death screen. */
+  onDeath?: () => void;
 }
 
 export interface WorldSceneControls {
@@ -578,6 +580,7 @@ export async function mountWorldScene(
 
   // Frame cache so hotkey handlers don't need to re-run the interpolator.
   let lastFrame: ReturnType<typeof interp.interpolate> = { players: [], mobs: [] };
+  let wasDead = false;
 
   // ─── Render loop ──────────────────────────────────────────────
   app.ticker.add((ticker) => {
@@ -597,6 +600,9 @@ export async function mountWorldScene(
           hp: meP.hp,
           maxHp: meP.maxHp,
         });
+        // Fire the death screen once on the rising edge of `dead`.
+        if (meP.dead && !wasDead) opts.onDeath?.();
+        wasDead = meP.dead;
       }
     }
 
@@ -614,6 +620,7 @@ export async function mountWorldScene(
       entry.container.x = s.x;
       entry.container.y = s.y;
       entry.container.zIndex = p.pos.y;
+      entry.container.alpha = p.dead ? 0.3 : 1; // corpses fade (S18)
       // Face the direction of travel; hold facing when standing still.
       const ddx = p.pos.x - entry.lastPos.x;
       const ddy = p.pos.y - entry.lastPos.y;
