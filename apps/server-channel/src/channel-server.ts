@@ -10,6 +10,10 @@ import {
   type ClientMessage,
   type Vec2,
   type PlayerId,
+  computeSnapshotDelta,
+  emptyFrame,
+  type HandledFrame,
+  type ZoneSnapshot,
 } from '@mmo/protocol';
 import { rollItemDrop, aggregateEquipped, rarityOf, getZoneDef, portalAt } from '@mmo/domain';
 import type { WorldNpc, WorldPortal } from '@mmo/protocol';
@@ -46,6 +50,8 @@ interface Connection {
   accountId: string | null; // set on Hello; recorded on audit rows
   /** Portal the player currently stands on — debounces the transition signal. */
   onPortalId: string | null;
+  /** Delta snapshots (S24): force a full keyframe on the player's first frame. */
+  needsKeyframe?: boolean;
 }
 
 export interface ChannelServerOptions {
@@ -127,6 +133,57 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
   function flushAllSnapshots(): void {
     if (!snapshotRepo) return;
     for (const conn of connections.values()) flushSnapshot(conn);
+  }
+
+  // ─── Delta snapshots (S24) ──────────────────────────────────────
+  // Entities are referenced by a small, stable per-zone handle so deltas don't
+  // resend 36-byte UUIDs. A keyframe (full state) is broadcast every KEYFRAME_MS
+  // and whenever a player joins (needs a baseline); all other ticks send a delta
+  // against the shared previous frame.
+  const KEYFRAME_MS = 5_000;
+  const handleOf = new Map<string, number>();
+  let nextHandle = 1;
+  let prevFrame: HandledFrame = emptyFrame();
+  let lastKeyframeAt = 0;
+
+  function toHandledFrame(snap: ZoneSnapshot): HandledFrame {
+    const f = emptyFrame(snap.tick);
+    const seen = new Set<string>();
+    const handle = (key: string): number => {
+      let h = handleOf.get(key);
+      if (h === undefined) { h = nextHandle++; handleOf.set(key, h); }
+      seen.add(key);
+      return h;
+    };
+    for (const p of snap.players) f.players.set(handle('p:' + p.id), p);
+    for (const m of snap.mobs) f.mobs.set(handle('m:' + m.id), m);
+    for (const g of snap.groundItems) f.ground.set(handle('g:' + g.id), g);
+    for (const key of [...handleOf.keys()]) if (!seen.has(key)) handleOf.delete(key); // retire gone ids
+    return f;
+  }
+
+  function broadcastFrame(now: number): void {
+    const frame = toHandledFrame(snapshotZone(zone));
+    const anyNeedsKeyframe = [...connections.values()].some((c) => c.playerId && c.needsKeyframe);
+    const keyframe = anyNeedsKeyframe || now - lastKeyframeAt >= KEYFRAME_MS;
+    let msg: ServerMessage;
+    if (keyframe) {
+      msg = {
+        type: 'keyframe', tick: frame.tick,
+        players: [...frame.players].map(([h, p]) => ({ h, ...p })),
+        mobs: [...frame.mobs].map(([h, m]) => ({ h, ...m })),
+        ground: [...frame.ground].map(([h, g]) => ({ h, ...g })),
+      };
+      lastKeyframeAt = now;
+      for (const c of connections.values()) c.needsKeyframe = false;
+    } else {
+      msg = { type: 'delta', delta: computeSnapshotDelta(prevFrame, frame) };
+    }
+    prevFrame = frame;
+    const payload = encodeServerMessage(msg);
+    for (const { ws } of connections.values()) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    }
   }
 
   // Routing self-registration is enabled only when a channelId is configured
@@ -213,6 +270,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       conn.playerId = playerId;
       conn.characterId = msg.characterId;
       conn.accountId = session.accountId;
+      conn.needsKeyframe = true; // first frame must be a full keyframe (S24)
       // Load saved tripod + passive loadouts (Redis) and equipped gear
       // (Postgres) so S09/S10/S13 selections take effect from the first cast.
       // equippedPyroSkillCount defaults to the full 6-of-6 Pyro hotbar at
@@ -414,10 +472,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       }
     }
 
-    const payload = encodeServerMessage({ type: 'snapshot', snapshot: snapshotZone(zone) });
-    for (const { ws } of connections.values()) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
-    }
+    broadcastFrame(Date.now());
   }
 
   return {

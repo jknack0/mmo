@@ -14,6 +14,7 @@ import {
   TextureSource,
 } from 'pixi.js';
 import type { ServerMessage, Vec2, GroundItem } from '@mmo/protocol';
+import { createSnapshotReconstructor } from '@mmo/protocol';
 import { getItemBase, RARITY_COLOR, type Rarity } from '@mmo/domain';
 import { createChannelClient, type ChannelClient } from '../network/channel-client.js';
 import {
@@ -410,6 +411,9 @@ export async function mountWorldScene(
   // ─── Channel client + interpolator ────────────────────────────
   const client: ChannelClient = createChannelClient({ wsUrl: opts.wsUrl });
   const interp = createSnapshotInterpolator({ lerpRate: 12 });
+  // Delta snapshots (S24): rebuild full ZoneSnapshots from keyframe/delta frames
+  // (or pass through un-delta'd snapshots from the Rift) before interpolating.
+  const reconstructor = createSnapshotReconstructor();
   let myId: string | null = null;
   let zoneSize: Vec2 = { x: 30, y: 30 };
 
@@ -433,9 +437,15 @@ export async function mountWorldScene(
         opts.onRiftStatus?.({ phase: msg.phase, kills: msg.kills, quota: msg.quota, deaths: msg.deaths, maxDeaths: msg.maxDeaths });
         break;
       case 'snapshot':
-        interp.ingest(msg.snapshot);
-        latestGroundItems = msg.snapshot.groundItems ?? [];
+      case 'keyframe':
+      case 'delta': {
+        const snap = reconstructor.ingest(msg);
+        if (snap) {
+          interp.ingest(snap);
+          latestGroundItems = snap.groundItems ?? [];
+        }
         break;
+      }
       case 'picked-up':
         requestedPickups.delete(msg.itemId);
         opts.onPickup?.(msg.baseId);
