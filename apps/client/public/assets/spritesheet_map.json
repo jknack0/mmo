@@ -8,8 +8,8 @@
   },
   "sheets": {
     "hero_pyromancer_idle_8dir.png": {
-      "cols": 8,
-      "rows": 1,
+      "cols": 4,
+      "rows": 16,
       "cellW": 16,
       "cellH": 21,
       "frames": [
@@ -27,7 +27,19 @@
         0.95
       ],
       "renderScale": 2,
-      "note": "player Pyromancer. Orb hidden on n/ne/nw facings (drawn separately as a glow in-engine)."
+      "clips": {
+        "idle": {
+          "frames": 2,
+          "fps": 3,
+          "row": 0
+        },
+        "move": {
+          "frames": 4,
+          "fps": 8,
+          "row": 8
+        }
+      },
+      "note": "player Pyromancer. idle(2)+move(4) x 8 facings, clip sheet. Fire orb hidden on n/ne/nw (back) facings."
     },
     "mob_skeleton_base.png": {
       "cols": 4,
