@@ -25,3 +25,5 @@ export * from './zones.js';
 export * from './respawn.js';
 // S19 (#21): Rift instance phase machine.
 export * from './rift.js';
+// S11 (#13): disciplines + 2-discipline mixing.
+export * from './disciplines.js';

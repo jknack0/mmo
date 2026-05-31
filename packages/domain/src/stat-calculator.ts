@@ -53,6 +53,8 @@ export interface DerivedStats {
   maxHp: number;
   /** Flat bonus added to weapon (basic-attack) damage. */
   weaponDamageBonus: number;
+  /** Multiplier on weapon (physical / Blademaster) skill damage (S11). */
+  weaponDamageMult: number;
   /** Character-level Magic Find % (ADR-0005 — never a gear affix). */
   magicFind: number;
 }
@@ -88,6 +90,7 @@ export function baseDerivedStats(cap: number = DEFAULT_BURN_STACK_CAP): DerivedS
     armor: 0,
     maxHp: BASE_HP,
     weaponDamageBonus: 0,
+    weaponDamageMult: 1,
     magicFind: 0,
   };
 }
@@ -144,6 +147,9 @@ function applyMod(s: DerivedStats, mod: PassiveMod, ctx: Required<StatContext>):
       break;
     case 'detonatorDamagePerStackMult':
       s.detonatorDamagePerStackMult += mod.addPct / 100;
+      break;
+    case 'weaponDamageMult':
+      s.weaponDamageMult += mod.addPct / 100;
       break;
     case 'maxBurnStacks':
       // Inferno (Infinity) wins regardless of node order.

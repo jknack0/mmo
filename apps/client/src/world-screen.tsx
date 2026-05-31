@@ -11,6 +11,7 @@ import { TripodPanel } from './tripod-panel.js';
 import { PassiveTreePanel } from './passive-tree-panel.js';
 import { InventoryPanel } from './inventory-panel.js';
 import { VendorPanel } from './vendor-panel.js';
+import { DisciplinePanel } from './discipline-panel.js';
 
 export interface WorldScreenProps {
   sessionToken: string;
@@ -71,11 +72,12 @@ export function WorldScreen(props: WorldScreenProps) {
   const [showPassives, setShowPassives] = createSignal(false);
   const [showInventory, setShowInventory] = createSignal(false);
   const [showVendor, setShowVendor] = createSignal(false);
+  const [showDisc, setShowDisc] = createSignal(false);
   const [pickupKey, setPickupKey] = createSignal(0);
   const [zoneName, setZoneName] = createSignal('The Sundered Reaches');
   const [dead, setDead] = createSignal(false);
   const [respawning, setRespawning] = createSignal(false);
-  const [rift, setRift] = createSignal<{ phase: string; kills: number; quota: number } | null>(null);
+  const [rift, setRift] = createSignal<{ phase: string; kills: number; quota: number; deaths: number; maxDeaths: number } | null>(null);
   let mountEl: HTMLDivElement | undefined;
   let cleanup: (() => void) | null = null;
   let controls: WorldSceneControls | null = null;
@@ -214,6 +216,13 @@ export function WorldScreen(props: WorldScreenProps) {
         <button
           type="button"
           class="ts-btn"
+          onClick={() => setShowDisc(true)}
+        >
+          Disciplines
+        </button>
+        <button
+          type="button"
+          class="ts-btn"
           onClick={() => setShowInventory(true)}
         >
           Inventory
@@ -264,6 +273,14 @@ export function WorldScreen(props: WorldScreenProps) {
           refreshKey={pickupKey()}
           onUse={(itemId) => controls?.useItem(itemId)}
           onClose={() => setShowInventory(false)}
+        />
+      </Show>
+
+      <Show when={showDisc()}>
+        <DisciplinePanel
+          token={props.sessionToken}
+          characterId={props.character.id}
+          onClose={() => setShowDisc(false)}
         />
       </Show>
 

@@ -10,8 +10,8 @@ import {
 } from './passives.js';
 
 describe('PASSIVE_NODES table', () => {
-  it('has exactly 20 nodes', () => {
-    expect(PASSIVE_NODES.length).toBe(20);
+  it('has exactly 24 nodes', () => {
+    expect(PASSIVE_NODES.length).toBe(24);
   });
 
   it('has 2 root nodes and 6 nodes per archetype path', () => {
@@ -141,7 +141,7 @@ describe('allocatableNodes', () => {
   it('offers the three tier-1 path nodes once both roots are taken', () => {
     const next = allocatableNodes({ 'embered-soul': 1, 'inner-furnace': 1 });
     expect(next.sort()).toEqual(
-      ['sharpened-flame', 'lingering-heat', 'heat-mirage'].sort()
+      ['sharpened-flame', 'lingering-heat', 'heat-mirage', 'honed-edge'].sort()
     );
   });
 
