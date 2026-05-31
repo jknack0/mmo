@@ -2,11 +2,12 @@
 // into a div on first render. Hosts the HUD (HP/Spirit/Wrath bars +
 // skill bar) as plain Solid markup per ADR-0012.
 
-import { onMount, onCleanup, createSignal, Show } from 'solid-js';
+import { onMount, onCleanup, createSignal, Show, For } from 'solid-js';
 import type { Character } from './character-client.js';
 import { connect, respawnCharacter } from './network/gateway-client.js';
 import { RESPAWN_GOLD_COST } from '@mmo/domain';
 import { mountWorldScene, type LocalPlayerStats, type WorldSceneControls } from './world/world-scene.js';
+import { hotbarView, type HotbarSlotView } from './world/hotbar.js';
 import { TripodPanel } from './tripod-panel.js';
 import { PassiveTreePanel } from './passive-tree-panel.js';
 import { InventoryPanel } from './inventory-panel.js';
@@ -46,24 +47,38 @@ function Orb(props: { kind: 'spirit' | 'wrath' | 'hp'; current: number; max: num
   );
 }
 
-// Pixel hotbar slot (`.ts-slot`). Icon framed from the 6-frame icon_skills sheet.
-function SkillSlot(props: { hotkey: string; icon: number; cost: number; wrath?: boolean }) {
+// Pixel hotbar slot (`.ts-slot`). Driven by the live HotbarSlotView: cooldown
+// sweep (--cd), countdown text (.is-cooling), grey-out when uncastable
+// (.is-disabled), and the deny shake (.is-deny). Clicking casts the skill —
+// the world scene auto-targets the nearest mob and walks into range.
+function SkillSlot(props: { slot: HotbarSlotView; onCast: (skillId: string) => void }) {
+  const slot = () => props.slot;
   return (
-    <button class="ts-slot" type="button">
+    <button
+      class="ts-slot"
+      type="button"
+      classList={{
+        'is-cooling': slot().cooling,
+        'is-disabled': slot().disabled,
+        'is-deny': slot().deny,
+      }}
+      style={{ '--cd': String(slot().cdFrac) }}
+      onClick={() => props.onCast(slot().skillId)}
+    >
       <div
         class="ts-slot__icon"
         style={{
           'background-image': 'url(/assets/icon_skills.png)',
           'background-size': '600% 100%',
-          'background-position': `${(props.icon / 5) * 100}% 0`,
+          'background-position': `${(slot().icon / 5) * 100}% 0`,
           'background-repeat': 'no-repeat',
           'image-rendering': 'pixelated',
         }}
       />
       <div class="ts-slot__cd" />
-      <div class="ts-slot__cdtext" />
-      <div class="ts-slot__key">{props.hotkey}</div>
-      <div class={`ts-slot__cost${props.wrath ? ' ts-slot__cost--wrath' : ''}`}>{props.cost}</div>
+      <div class="ts-slot__cdtext">{slot().cdSeconds || ''}</div>
+      <div class="ts-slot__key">{slot().key.toUpperCase()}</div>
+      <div class={`ts-slot__cost${slot().resource === 'wrath' ? ' ts-slot__cost--wrath' : ''}`}>{slot().cost}</div>
     </button>
   );
 }
@@ -71,6 +86,10 @@ function SkillSlot(props: { hotkey: string; icon: number; cost: number; wrath?: 
 export function WorldScreen(props: WorldScreenProps) {
   const [error, setError] = createSignal<string | null>(null);
   const [stats, setStats] = createSignal<LocalPlayerStats>(DEFAULT_STATS);
+  const [hotbarSlots, setHotbarSlots] = createSignal<HotbarSlotView[]>(
+    hotbarView(new Map(), new Map(), 0, 0, 0)
+  );
+  const cast = (skillId: string) => controls?.castSkill(skillId);
   const [showTripods, setShowTripods] = createSignal(false);
   const [showPassives, setShowPassives] = createSignal(false);
   const [showInventory, setShowInventory] = createSignal(false);
@@ -131,6 +150,7 @@ export function WorldScreen(props: WorldScreenProps) {
           }
         },
         onStats: (s) => { setStats(s); e2eSet({ stats: s }); },
+        onHotbar: (slots) => setHotbarSlots(slots),
         onPickup: () => setPickupKey((k) => k + 1),
         onConsumed: () => setPickupKey((k) => k + 1),
         onControls: (c) => { controls = c; e2eSet({ controls: c, characterId: info.character.id, sessionToken: props.sessionToken }); },
@@ -223,12 +243,7 @@ export function WorldScreen(props: WorldScreenProps) {
       {/* HUD: bottom-center 6-slot Pyromancy hotbar */}
       <div class="absolute bottom-4 left-1/2 -translate-x-1/2">
         <div class="ts-hotbar">
-          <SkillSlot hotkey="Q" icon={0} cost={8} />
-          <SkillSlot hotkey="W" icon={1} cost={12} />
-          <SkillSlot hotkey="E" icon={2} cost={24} />
-          <SkillSlot hotkey="R" icon={3} cost={100} wrath />
-          <SkillSlot hotkey="A" icon={4} cost={30} />
-          <SkillSlot hotkey="S" icon={5} cost={45} />
+          <For each={hotbarSlots()}>{(slot) => <SkillSlot slot={slot} onCast={cast} />}</For>
         </div>
       </div>
 
