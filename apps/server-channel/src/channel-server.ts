@@ -211,6 +211,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
         type: 'welcome',
         you: playerId,
         zoneId: opts.zoneId ?? '',
+        instanceId: '',
         zoneSize: zone.size,
         tileMap: zone.tileMap,
         npcs,

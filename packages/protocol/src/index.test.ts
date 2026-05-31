@@ -71,6 +71,7 @@ describe('Protocol round-trip (JSON dev mode)', () => {
         type: 'welcome',
         you: 'player-1',
         zoneId: 'ashen-plains',
+        instanceId: '',
         zoneSize: { x: 30, y: 30 },
         tileMap: [
           [0, 0, 1],

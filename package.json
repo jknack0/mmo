@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n gw,ashen,hold,web -c blue,magenta,cyan,green \"pnpm --filter @mmo/server-gateway dev\" \"ZONE_ID=ashen-plains CHANNEL_ID=ashen-plains-ch0 CHANNEL_PORT=8081 CHANNEL_WS_URL=ws://localhost:8081 pnpm --filter @mmo/server-channel dev\" \"ZONE_ID=hold-veridian CHANNEL_ID=hold-veridian-ch0 CHANNEL_PORT=8082 CHANNEL_WS_URL=ws://localhost:8082 pnpm --filter @mmo/server-channel dev\" \"pnpm --filter @mmo/client dev\"",
+    "dev": "concurrently -n gw,ashen,hold,rift,web -c blue,magenta,cyan,red,green \"pnpm --filter @mmo/server-gateway dev\" \"ZONE_ID=ashen-plains CHANNEL_ID=ashen-plains-ch0 CHANNEL_PORT=8081 CHANNEL_WS_URL=ws://localhost:8081 pnpm --filter @mmo/server-channel dev\" \"ZONE_ID=hold-veridian CHANNEL_ID=hold-veridian-ch0 CHANNEL_PORT=8082 CHANNEL_WS_URL=ws://localhost:8082 pnpm --filter @mmo/server-channel dev\" \"ZONE_ID=rift-t1 CHANNEL_ID=rift-t1-ch0 CHANNEL_PORT=8083 CHANNEL_WS_URL=ws://localhost:8083 pnpm --filter @mmo/server-channel dev\" \"pnpm --filter @mmo/client dev\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "pnpm --filter @mmo/client test:e2e"

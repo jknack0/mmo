@@ -48,6 +48,7 @@ export interface ZoneDef {
 
 export const HOLD_VERIDIAN = 'hold-veridian';
 export const ASHEN_PLAINS = 'ashen-plains';
+export const RIFT_T1 = 'rift-t1';
 
 const holdVeridian: ZoneDef = {
   zoneId: HOLD_VERIDIAN,
@@ -87,9 +88,29 @@ const ashenPlains: ZoneDef = {
   ],
 };
 
+// The T1 Rift (S19). Instanced — mob spawns + phase logic come from the rift
+// machine at runtime, not from this def. Cap 2 = ad-hoc duo party. No portals
+// (exit is the boss-kill completion handoff).
+const riftT1: ZoneDef = {
+  zoneId: RIFT_T1,
+  name: 'The First Rift',
+  size: { x: 28, y: 28 },
+  cap: 2,
+  mobs: [],
+  npcs: [],
+  portals: [],
+  rocks: [
+    { x: 8, y: 8 },
+    { x: 19, y: 9 },
+    { x: 9, y: 19 },
+    { x: 18, y: 18 },
+  ],
+};
+
 export const ZONE_DEFS: Record<string, ZoneDef> = {
   [HOLD_VERIDIAN]: holdVeridian,
   [ASHEN_PLAINS]: ashenPlains,
+  [RIFT_T1]: riftT1,
 };
 
 export function getZoneDef(zoneId: string): ZoneDef | undefined {

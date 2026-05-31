@@ -8,8 +8,9 @@ import Redis from 'ioredis';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
-import { getZoneDef, buildZoneTileMap, ASHEN_PLAINS } from '@mmo/domain';
+import { getZoneDef, buildZoneTileMap, ASHEN_PLAINS, RIFT_T1 } from '@mmo/domain';
 import { buildChannelServer } from './channel-server.js';
+import { buildRiftServer } from './rift-server.js';
 import { createChannelDb } from './db/client.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -37,21 +38,23 @@ async function main(): Promise<void> {
   const db = DATABASE_URL ? createChannelDb(DATABASE_URL) : undefined;
   if (!db) console.warn('[channel] DATABASE_URL unset — item drops/pickups disabled.');
 
-  const capacity = Number.parseInt(process.env.CHANNEL_CAPACITY ?? String(def.cap), 10);
-  const server = buildChannelServer({
-    redis,
-    db,
-    zoneId: ZONE_ID,
-    channelId: CHANNEL_ID,
-    processUrl: CHANNEL_WS_URL,
-    capacity,
-    zone: { size: def.size, tileMap: buildZoneTileMap(ZONE_ID) },
-    mobs: def.mobs.map((m) => ({ id: m.id, kind: m.kind, pos: { ...m.pos }, maxHp: m.maxHp })),
-  });
+  // The Rift is instanced — a different server (per-party private dungeons).
+  const server =
+    ZONE_ID === RIFT_T1
+      ? buildRiftServer({ redis, db, zoneId: ZONE_ID, channelId: CHANNEL_ID, processUrl: CHANNEL_WS_URL })
+      : buildChannelServer({
+          redis,
+          db,
+          zoneId: ZONE_ID,
+          channelId: CHANNEL_ID,
+          processUrl: CHANNEL_WS_URL,
+          capacity: Number.parseInt(process.env.CHANNEL_CAPACITY ?? String(def.cap), 10),
+          zone: { size: def.size, tileMap: buildZoneTileMap(ZONE_ID) },
+          mobs: def.mobs.map((m) => ({ id: m.id, kind: m.kind, pos: { ...m.pos }, maxHp: m.maxHp })),
+        });
 
   await server.start(CHANNEL_PORT);
   console.log(`[channel] ${def.name} (${ZONE_ID}) on ws://localhost:${CHANNEL_PORT}`);
-  console.log(`[channel] ${def.size.x}×${def.size.y}, cap ${capacity}, ${def.mobs.length} mobs, tick 20Hz`);
 
   const shutdown = async () => {
     console.log('[channel] shutting down…');
