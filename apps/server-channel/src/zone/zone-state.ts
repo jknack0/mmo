@@ -109,6 +109,9 @@ export interface PlayerSpawnInput {
   equippedPyroSkillCount?: number;
   /** Aggregated stats of equipped items (S13) — folded into derivedStats. */
   itemStats?: AggregatedItemStats;
+  /** Restored current HP from a crash-recovery snapshot (S22). Clamped to
+   *  1..maxHp; omitted = spawn at full HP. */
+  hp?: number;
 }
 
 export interface MobSpawnInput {
@@ -202,7 +205,11 @@ export function spawnPlayer(zone: ZoneState, input: PlayerSpawnInput): ServerPla
     tripods: input.tripods ?? {},
     passives,
     derivedStats,
-    hp: derivedStats.maxHp,
+    // Crash recovery (S22): restore saved HP, clamped to a live 1..maxHp so a
+    // snapshot can never spawn a player dead or over-healed.
+    hp: input.hp !== undefined
+      ? Math.max(1, Math.min(input.hp, derivedStats.maxHp))
+      : derivedStats.maxHp,
     maxHp: derivedStats.maxHp,
     dead: false,
   };
