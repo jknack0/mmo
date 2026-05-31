@@ -5,7 +5,9 @@ import { AddressInfo } from 'node:net';
 import {
   encodeClientMessage,
   decodeServerMessage,
+  createSnapshotReconstructor,
   type ServerMessage,
+  type ZoneSnapshot,
 } from '@mmo/protocol';
 import { buildChannelServer, type ChannelServer } from './channel-server.js';
 
@@ -46,12 +48,32 @@ async function waitFor<T extends ServerMessage>(
 
 const isWelcome = (m: ServerMessage): m is Extract<ServerMessage, { type: 'welcome' }> =>
   m.type === 'welcome';
-const isSnapshot = (m: ServerMessage): m is Extract<ServerMessage, { type: 'snapshot' }> =>
-  m.type === 'snapshot';
 const isError = (m: ServerMessage): m is Extract<ServerMessage, { type: 'error' }> =>
   m.type === 'error';
 const isDamage = (m: ServerMessage): m is Extract<ServerMessage, { type: 'damage' }> =>
   m.type === 'damage';
+
+// Delta snapshots (S24): the server streams keyframe/delta frames. Attach a
+// persistent reconstructor that rebuilds full ZoneSnapshots, and poll for a
+// predicate against the latest reconstructed state.
+function trackSnapshots(ws: WebSocket): { waitForSnap: (pred: (s: ZoneSnapshot) => boolean, timeoutMs?: number) => Promise<ZoneSnapshot> } {
+  const recon = createSnapshotReconstructor();
+  let latest: ZoneSnapshot | null = null;
+  ws.on('message', (data: WebSocket.RawData) => {
+    let msg: ServerMessage;
+    try { msg = decodeServerMessage(data as Uint8Array); } catch { return; }
+    const s = recon.ingest(msg);
+    if (s) latest = s;
+  });
+  return {
+    waitForSnap(pred, timeoutMs = 3000) {
+      return vi.waitFor(() => {
+        if (!latest || !pred(latest)) throw new Error('snapshot predicate not met');
+        return latest;
+      }, { timeout: timeoutMs, interval: 30 });
+    },
+  };
+}
 
 describe('ChannelServer', () => {
   let redis: Redis;
@@ -132,35 +154,30 @@ describe('ChannelServer', () => {
   it('broadcasts snapshots after Hello', async () => {
     const token = await issueSession('acct-2');
     const ws = await connectClient();
+    const track = trackSnapshots(ws);
     void sendHello(ws, { sessionToken: token, characterId: 'char-2', name: 'Bob' });
     await waitFor(ws, isWelcome);
-    const snap = await waitFor(ws, isSnapshot);
-    expect(snap.snapshot.players.find((p) => p.name === 'Bob')).toBeTruthy();
+    await track.waitForSnap((s) => !!s.players.find((p) => p.name === 'Bob'));
     ws.close();
   });
 
   it('applies a Move command and the new position appears in the next snapshot', async () => {
     const token = await issueSession('acct-3');
     const ws = await connectClient();
+    const track = trackSnapshots(ws);
     void sendHello(ws, { sessionToken: token, characterId: 'char-3', name: 'Cara' });
     const welcome = await waitFor(ws, isWelcome);
     const myId = welcome.you;
 
-    // Settle: read a snapshot to confirm spawn.
-    await waitFor(ws, isSnapshot);
+    // Settle: confirm spawn shows up.
+    await track.waitForSnap((s) => !!s.players.find((p) => p.id === myId));
     ws.send(encodeClientMessage({ type: 'move', target: { x: 8, y: 8 } }));
 
-    // Wait for the player to make visible progress toward the target.
-    const startPos = { x: 5, y: 5 };
-    await vi.waitFor(
-      async () => {
-        const snap = await waitFor(ws, isSnapshot, 500);
-        const me = snap.snapshot.players.find((p) => p.id === myId);
-        expect(me).toBeTruthy();
-        expect(me!.pos.x).toBeGreaterThan(startPos.x);
-      },
-      { timeout: 3000, interval: 50 }
-    );
+    // Wait for the player to make visible progress toward the target (started at 5,5).
+    await track.waitForSnap((s) => {
+      const me = s.players.find((p) => p.id === myId);
+      return !!me && me.pos.x > 5;
+    });
     ws.close();
   });
 
@@ -170,6 +187,7 @@ describe('ChannelServer', () => {
 
     const a = await connectClient();
     const b = await connectClient();
+    const trackB = trackSnapshots(b);
 
     void sendHello(a, { sessionToken: aToken, characterId: 'char-a', name: 'A' });
     void sendHello(b, { sessionToken: bToken, characterId: 'char-b', name: 'B' });
@@ -178,24 +196,12 @@ describe('ChannelServer', () => {
     await waitFor(b, isWelcome);
 
     // Confirm B sees A.
-    await vi.waitFor(
-      async () => {
-        const snap = await waitFor(b, isSnapshot, 500);
-        expect(snap.snapshot.players.some((p) => p.name === 'A')).toBe(true);
-      },
-      { timeout: 3000, interval: 50 }
-    );
+    await trackB.waitForSnap((s) => s.players.some((p) => p.name === 'A'));
 
     a.close();
 
     // Now B should stop seeing A.
-    await vi.waitFor(
-      async () => {
-        const snap = await waitFor(b, isSnapshot, 500);
-        expect(snap.snapshot.players.some((p) => p.name === 'A')).toBe(false);
-      },
-      { timeout: 3000, interval: 50 }
-    );
+    await trackB.waitForSnap((s) => !s.players.some((p) => p.name === 'A'));
 
     b.close();
   });
@@ -203,11 +209,12 @@ describe('ChannelServer', () => {
   it('broadcasts a Damage event when a valid Attack lands', async () => {
     const token = await issueSession('acct-atk');
     const ws = await connectClient();
+    const track = trackSnapshots(ws);
     void sendHello(ws, { sessionToken: token, characterId: 'char-atk', name: 'Atk' });
     const welcome = await waitFor(ws, isWelcome);
     // Get spawned at centre (5,5) and the mob is at (5,6) → in range.
     // Wait a beat so the mob snapshot has propagated.
-    await waitFor(ws, isSnapshot);
+    await track.waitForSnap((s) => s.mobs.length > 0);
 
     ws.send(
       encodeClientMessage({ type: 'attack', targetId: 'skel-1', skillId: 'basic-attack' })
@@ -227,9 +234,10 @@ describe('ChannelServer', () => {
     // and the tick loop fires damage every cooldown until the mob dies.
     const token = await issueSession('acct-kill');
     const ws = await connectClient();
+    const track = trackSnapshots(ws);
     void sendHello(ws, { sessionToken: token, characterId: 'char-kill', name: 'K' });
     await waitFor(ws, isWelcome);
-    await waitFor(ws, isSnapshot);
+    await track.waitForSnap((s) => s.mobs.length > 0);
 
     ws.send(encodeClientMessage({ type: 'attack', targetId: 'skel-1', skillId: 'basic-attack' }));
 

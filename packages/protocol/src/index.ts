@@ -13,6 +13,20 @@ import {
   MAGIC_BINARY,
   MAGIC_JSON,
 } from './binary.js';
+import {
+  PF, MF,
+  type Handle,
+  type PlayerDelta,
+  type MobDelta,
+  type SnapshotDelta,
+} from './delta.js';
+
+export * from './delta.js';
+
+/** A keyframe entity: full record tagged with its per-zone handle (S24). */
+export type HandledPlayer = { h: Handle } & PlayerState;
+export type HandledMob = { h: Handle } & MobState;
+export type HandledGround = { h: Handle } & GroundItem;
 
 // ─── Dev-mode flag (JSON wire) ──────────────────────────────────
 // On = encoders emit JSON frames (decoders always accept both). Defaults from
@@ -141,6 +155,9 @@ export type ServerMessage =
   | { type: 'zone-transition'; zoneId: string }
   | { type: 'rift-status'; phase: string; kills: number; quota: number; deaths: number; maxDeaths: number }
   | { type: 'snapshot'; snapshot: ZoneSnapshot }
+  // Delta snapshots (S24): full keyframe + per-tick field deltas, handle-keyed.
+  | { type: 'keyframe'; tick: number; players: HandledPlayer[]; mobs: HandledMob[]; ground: HandledGround[] }
+  | { type: 'delta'; delta: SnapshotDelta }
   | { type: 'damage'; event: DamageEvent }
   | { type: 'picked-up'; itemId: EntityId; baseId: string }
   | { type: 'consumed'; itemId: EntityId; heal: number }
@@ -268,6 +285,19 @@ function decodeServerJson(raw: string): ServerMessage {
       if (!Array.isArray(snap.groundItems)) snap.groundItems = [];
       return { type: 'snapshot', snapshot: snap };
     }
+    case 'keyframe':
+      return {
+        type: 'keyframe',
+        tick: typeof parsed.tick === 'number' ? parsed.tick : 0,
+        players: Array.isArray(parsed.players) ? (parsed.players as HandledPlayer[]) : [],
+        mobs: Array.isArray(parsed.mobs) ? (parsed.mobs as HandledMob[]) : [],
+        ground: Array.isArray(parsed.ground) ? (parsed.ground as HandledGround[]) : [],
+      };
+    case 'delta':
+      if (typeof parsed.delta !== 'object' || parsed.delta === null) {
+        throw new Error('protocol: malformed delta');
+      }
+      return { type: 'delta', delta: parsed.delta as SnapshotDelta };
     case 'damage': {
       const ev = parsed.event;
       if (
@@ -306,7 +336,7 @@ function decodeServerJson(raw: string): ServerMessage {
 // Message-type tags (u8, follow the magic byte).
 const C_HELLO = 1, C_MOVE = 2, C_ATTACK = 3, C_DODGE = 4, C_PICKUP = 5, C_USE_ITEM = 6;
 const S_WELCOME = 1, S_ZONE_TRANSITION = 2, S_RIFT_STATUS = 3, S_SNAPSHOT = 4,
-  S_DAMAGE = 5, S_PICKED_UP = 6, S_CONSUMED = 7, S_ERROR = 8;
+  S_DAMAGE = 5, S_PICKED_UP = 6, S_CONSUMED = 7, S_ERROR = 8, S_KEYFRAME = 9, S_DELTA = 10;
 
 function writeVec2(w: ByteWriter, v: Vec2): void {
   w.f32(v.x);
@@ -364,6 +394,54 @@ function writeGround(w: ByteWriter, g: GroundItem): void {
 }
 function readGround(r: ByteReader): GroundItem {
   return { id: r.str(), baseId: r.str(), pos: readVec2(r), rarity: r.str() };
+}
+
+function writeHandle(w: ByteWriter, h: Handle): void { w.varuint(h); }
+
+function writePlayerDelta(w: ByteWriter, d: PlayerDelta): void {
+  w.varuint(d.h); w.varuint(d.mask);
+  if (d.mask & PF.POS) writeVec2(w, d.pos!);
+  if (d.mask & PF.ENGAGED) { w.bool(d.engagedTargetId != null); if (d.engagedTargetId != null) w.str(d.engagedTargetId); }
+  if (d.mask & PF.SPIRIT) w.f32(d.spirit!);
+  if (d.mask & PF.WRATH) w.f32(d.wrath!);
+  if (d.mask & PF.HP) w.f32(d.hp!);
+  if (d.mask & PF.DEAD) w.bool(d.dead!);
+  if (d.mask & PF.MAXES) { w.f32(d.maxSpirit!); w.f32(d.maxWrath!); w.f32(d.maxHp!); }
+  if (d.mask & PF.IDENTITY) { w.str(d.name!); w.str(d.characterId!); }
+}
+function readPlayerDelta(r: ByteReader): PlayerDelta {
+  const h = r.varuint(), mask = r.varuint();
+  const d: PlayerDelta = { h, mask };
+  if (mask & PF.POS) d.pos = readVec2(r);
+  if (mask & PF.ENGAGED) d.engagedTargetId = r.bool() ? r.str() : null;
+  if (mask & PF.SPIRIT) d.spirit = r.f32();
+  if (mask & PF.WRATH) d.wrath = r.f32();
+  if (mask & PF.HP) d.hp = r.f32();
+  if (mask & PF.DEAD) d.dead = r.bool();
+  if (mask & PF.MAXES) { d.maxSpirit = r.f32(); d.maxWrath = r.f32(); d.maxHp = r.f32(); }
+  if (mask & PF.IDENTITY) { d.name = r.str(); d.characterId = r.str(); }
+  return d;
+}
+
+function writeMobDelta(w: ByteWriter, d: MobDelta): void {
+  w.varuint(d.h); w.varuint(d.mask);
+  if (d.mask & MF.POS) writeVec2(w, d.pos!);
+  if (d.mask & MF.HP) w.f32(d.hp!);
+  if (d.mask & MF.ALIVE) w.bool(d.alive!);
+  if (d.mask & MF.BURN) w.varuint(d.burnStacks ?? 0);
+  if (d.mask & MF.MAXHP) w.f32(d.maxHp!);
+  if (d.mask & MF.KIND) w.str(d.kind!);
+}
+function readMobDelta(r: ByteReader): MobDelta {
+  const h = r.varuint(), mask = r.varuint();
+  const d: MobDelta = { h, mask };
+  if (mask & MF.POS) d.pos = readVec2(r);
+  if (mask & MF.HP) d.hp = r.f32();
+  if (mask & MF.ALIVE) d.alive = r.bool();
+  if (mask & MF.BURN) d.burnStacks = r.varuint();
+  if (mask & MF.MAXHP) d.maxHp = r.f32();
+  if (mask & MF.KIND) d.kind = r.str();
+  return d;
 }
 
 function writeArray<T>(w: ByteWriter, items: T[], each: (w: ByteWriter, t: T) => void): void {
@@ -433,6 +511,25 @@ function packServer(w: ByteWriter, msg: ServerMessage): void {
       writeArray(w, msg.snapshot.mobs, writeMob);
       writeArray(w, msg.snapshot.groundItems, writeGround);
       return;
+    case 'keyframe':
+      w.u8(S_KEYFRAME);
+      w.varuint(msg.tick);
+      writeArray(w, msg.players, (ww, p) => { writeHandle(ww, p.h); writePlayer(ww, p); });
+      writeArray(w, msg.mobs, (ww, m) => { writeHandle(ww, m.h); writeMob(ww, m); });
+      writeArray(w, msg.ground, (ww, g) => { writeHandle(ww, g.h); writeGround(ww, g); });
+      return;
+    case 'delta': {
+      const d = msg.delta;
+      w.u8(S_DELTA);
+      w.varuint(d.baseTick); w.varuint(d.tick);
+      writeArray(w, d.players, writePlayerDelta);
+      writeArray(w, d.removedPlayers, writeHandle);
+      writeArray(w, d.mobs, writeMobDelta);
+      writeArray(w, d.removedMobs, writeHandle);
+      writeArray(w, d.groundAdded, (ww, g) => { writeHandle(ww, g.h); writeGround(ww, g); });
+      writeArray(w, d.removedGround, writeHandle);
+      return;
+    }
     case 'damage':
       w.u8(S_DAMAGE);
       w.str(msg.event.targetId); w.str(msg.event.attackerId); w.f32(msg.event.amount); w.bool(msg.event.fatal);
@@ -470,6 +567,23 @@ function unpackServer(r: ByteReader): ServerMessage {
       const mobs = readArray(r, readMob);
       const groundItems = readArray(r, readGround);
       return { type: 'snapshot', snapshot: { tick, players, mobs, groundItems } };
+    }
+    case S_KEYFRAME: {
+      const tick = r.varuint();
+      const players = readArray(r, (rr) => { const h = rr.varuint(); return { h, ...readPlayer(rr) }; });
+      const mobs = readArray(r, (rr) => { const h = rr.varuint(); return { h, ...readMob(rr) }; });
+      const ground = readArray(r, (rr) => { const h = rr.varuint(); return { h, ...readGround(rr) }; });
+      return { type: 'keyframe', tick, players, mobs, ground };
+    }
+    case S_DELTA: {
+      const baseTick = r.varuint(), tick = r.varuint();
+      const players = readArray(r, readPlayerDelta);
+      const removedPlayers = readArray(r, (rr) => rr.varuint());
+      const mobs = readArray(r, readMobDelta);
+      const removedMobs = readArray(r, (rr) => rr.varuint());
+      const groundAdded = readArray(r, (rr) => { const h = rr.varuint(); return { h, ...readGround(rr) }; });
+      const removedGround = readArray(r, (rr) => rr.varuint());
+      return { type: 'delta', delta: { baseTick, tick, players, removedPlayers, mobs, removedMobs, groundAdded, removedGround } };
     }
     case S_DAMAGE: {
       const targetId = r.str(), attackerId = r.str(), amount = r.f32(), fatal = r.bool();
