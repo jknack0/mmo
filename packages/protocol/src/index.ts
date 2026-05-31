@@ -53,6 +53,22 @@ export interface GroundItem {
   rarity: string;
 }
 
+/** A static town NPC (vendor / trainer / rift-portal), sent on welcome (S17). */
+export interface WorldNpc {
+  id: string;
+  kind: string;
+  pos: Vec2;
+  label: string;
+}
+
+/** A zone-exit portal, sent on welcome (S17). Stepping on it hands off zones. */
+export interface WorldPortal {
+  id: string;
+  pos: Vec2;
+  targetZoneId: string;
+  label: string;
+}
+
 export interface ZoneSnapshot {
   tick: number;
   players: PlayerState[];
@@ -85,7 +101,16 @@ export interface DamageEvent {
 // during the migration window; decoder normalises to null in that case.
 
 export type ServerMessage =
-  | { type: 'welcome'; you: PlayerId; zoneSize: Vec2; tileMap: number[][] }
+  | {
+      type: 'welcome';
+      you: PlayerId;
+      zoneId: string;
+      zoneSize: Vec2;
+      tileMap: number[][];
+      npcs: WorldNpc[];
+      portals: WorldPortal[];
+    }
+  | { type: 'zone-transition'; zoneId: string }
   | { type: 'snapshot'; snapshot: ZoneSnapshot }
   | { type: 'damage'; event: DamageEvent }
   | { type: 'picked-up'; itemId: EntityId; baseId: string }
@@ -176,9 +201,17 @@ export function decodeServerMessage(raw: string): ServerMessage {
       return {
         type: 'welcome',
         you: parsed.you,
+        zoneId: typeof parsed.zoneId === 'string' ? parsed.zoneId : '',
         zoneSize: parsed.zoneSize,
         tileMap: parsed.tileMap as number[][],
+        npcs: Array.isArray(parsed.npcs) ? (parsed.npcs as WorldNpc[]) : [],
+        portals: Array.isArray(parsed.portals) ? (parsed.portals as WorldPortal[]) : [],
       };
+    case 'zone-transition':
+      if (typeof parsed.zoneId !== 'string') {
+        throw new Error('protocol: malformed zone-transition');
+      }
+      return { type: 'zone-transition', zoneId: parsed.zoneId };
     case 'snapshot': {
       if (typeof parsed.snapshot !== 'object' || parsed.snapshot === null) {
         throw new Error('protocol: malformed snapshot');

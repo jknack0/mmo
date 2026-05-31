@@ -71,30 +71,53 @@ export function WorldScreen(props: WorldScreenProps) {
   const [showInventory, setShowInventory] = createSignal(false);
   const [showVendor, setShowVendor] = createSignal(false);
   const [pickupKey, setPickupKey] = createSignal(0);
+  const [zoneName, setZoneName] = createSignal('The Sundered Reaches');
   let mountEl: HTMLDivElement | undefined;
   let cleanup: (() => void) | null = null;
   let controls: WorldSceneControls | null = null;
+  let transitioning = false;
 
-  onMount(async () => {
+  const ZONE_NAMES: Record<string, string> = {
+    'hold-veridian': 'Hold Veridian',
+    'ashen-plains': 'Ashen Plains',
+  };
+
+  // Connect to a zone's channel + mount the scene. Re-invoked on a portal
+  // hand-off (S17): the old scene is torn down and a fresh one connects to the
+  // target zone's channel, so the swap is transparent to the player.
+  async function mountZone(zoneId?: string): Promise<void> {
     try {
-      const info = await connect(props.sessionToken, props.character.id);
+      const info = await connect(props.sessionToken, props.character.id, zoneId);
       if (!mountEl) return;
+      cleanup?.();
+      cleanup = null;
+      mountEl.replaceChildren(); // drop the old canvas before mounting the new one
+      setZoneName(ZONE_NAMES[info.zoneId ?? ''] ?? 'The Sundered Reaches');
       cleanup = await mountWorldScene({
         container: mountEl,
         wsUrl: info.wsUrl,
         sessionToken: props.sessionToken,
         characterId: info.character.id,
         characterName: info.character.name,
-        onDisconnected: () => setError('Disconnected from channel.'),
+        onDisconnected: () => {
+          if (!transitioning) setError('Disconnected from channel.');
+        },
         onStats: setStats,
         onPickup: () => setPickupKey((k) => k + 1),
         onConsumed: () => setPickupKey((k) => k + 1),
         onControls: (c) => (controls = c),
+        onZoneTransition: (target) => {
+          if (transitioning) return;
+          transitioning = true;
+          void mountZone(target).finally(() => (transitioning = false));
+        },
       });
     } catch (e) {
       setError((e as Error).message);
     }
-  });
+  }
+
+  onMount(() => void mountZone());
 
   onCleanup(() => {
     cleanup?.();
@@ -106,8 +129,8 @@ export function WorldScreen(props: WorldScreenProps) {
 
       {/* HUD: top-left zone identity */}
       <div class="absolute top-3 left-3 px-3 py-2" style={{ background: 'rgba(8,6,6,.55)' }}>
-        <div class="ts-zone-name">The Sundered Reaches</div>
-        <div class="ts-zone-sub">{props.character.name} · click to move · click mob = attack</div>
+        <div class="ts-zone-name">{zoneName()}</div>
+        <div class="ts-zone-sub">{props.character.name} · click to move · walk into a portal to travel</div>
       </div>
 
       {/* HUD: bottom-left resource orbs */}

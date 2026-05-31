@@ -1,12 +1,14 @@
-// Channel-server bootstrap. Owns one channel of one zone per ADR-0011.
-// Currently a single hardcoded zone (the alpha vertical-slice test zone).
-// ChannelRouter / multi-zone routing lands in S04 (#6).
+// Channel-server bootstrap. Owns one channel of one zone per ADR-0011. The zone
+// is selected by ZONE_ID and loaded from the shared zone defs (S17): size,
+// collision map, mob spawns, NPCs and portals all come from the def. Run one
+// process per zone (ashen-plains + hold-veridian) — see the root `dev` script.
 
 import 'dotenv/config';
 import Redis from 'ioredis';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
+import { getZoneDef, buildZoneTileMap, ASHEN_PLAINS } from '@mmo/domain';
 import { buildChannelServer } from './channel-server.js';
 import { createChannelDb } from './db/client.js';
 
@@ -17,54 +19,39 @@ loadDotenv({ path: path.resolve(__dirname, '../../../.env') });
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0';
 const DATABASE_URL = process.env.DATABASE_URL;
+const ZONE_ID = process.env.ZONE_ID ?? ASHEN_PLAINS;
 const CHANNEL_PORT = Number.parseInt(process.env.CHANNEL_PORT ?? '8081', 10);
-const ZONE_SIZE = { x: 30, y: 30 };
-// S04 routing identity — this process self-registers into the routing table.
-const ZONE_ID = process.env.ZONE_ID ?? 'ashen-plains';
-const CHANNEL_ID = process.env.CHANNEL_ID ?? 'ashen-plains-ch0';
+const CHANNEL_ID = process.env.CHANNEL_ID ?? `${ZONE_ID}-ch0`;
 const CHANNEL_WS_URL = process.env.CHANNEL_WS_URL ?? `ws://localhost:${CHANNEL_PORT}`;
-const CHANNEL_CAPACITY = Number.parseInt(process.env.CHANNEL_CAPACITY ?? '50', 10);
-
-// Alpha test zone: open grid with a couple of decorative blockers so the
-// tile-collision system actually has something to enforce.
-function buildTestTileMap(size: { x: number; y: number }): number[][] {
-  const map: number[][] = [];
-  for (let y = 0; y < size.y; y++) {
-    const row: number[] = [];
-    for (let x = 0; x < size.x; x++) {
-      const onBorder = x === 0 || y === 0 || x === size.x - 1 || y === size.y - 1;
-      const decorativeRock = (x === 10 && y === 10) || (x === 20 && y === 18);
-      row.push(onBorder || decorativeRock ? 1 : 0);
-    }
-    map.push(row);
-  }
-  return map;
-}
 
 async function main(): Promise<void> {
+  const def = getZoneDef(ZONE_ID);
+  if (!def) {
+    console.error(`[channel] unknown ZONE_ID "${ZONE_ID}"`);
+    process.exit(1);
+  }
+
   const redis = new Redis(REDIS_URL);
   // Postgres handle enables write-through drops/pickups + equipped-gear load
   // (S13, ADR-0013). Without DATABASE_URL the channel still runs, sans items.
   const db = DATABASE_URL ? createChannelDb(DATABASE_URL) : undefined;
   if (!db) console.warn('[channel] DATABASE_URL unset — item drops/pickups disabled.');
+
+  const capacity = Number.parseInt(process.env.CHANNEL_CAPACITY ?? String(def.cap), 10);
   const server = buildChannelServer({
     redis,
     db,
     zoneId: ZONE_ID,
     channelId: CHANNEL_ID,
     processUrl: CHANNEL_WS_URL,
-    capacity: CHANNEL_CAPACITY,
-    zone: { size: ZONE_SIZE, tileMap: buildTestTileMap(ZONE_SIZE) },
-    mobs: [
-      { id: 'skel-1', kind: 'skeleton', pos: { x: 15, y: 8 }, maxHp: 60 },
-      { id: 'skel-2', kind: 'skeleton', pos: { x: 18, y: 20 }, maxHp: 60 },
-      { id: 'skel-3', kind: 'skeleton', pos: { x: 22, y: 14 }, maxHp: 60 },
-    ],
+    capacity,
+    zone: { size: def.size, tileMap: buildZoneTileMap(ZONE_ID) },
+    mobs: def.mobs.map((m) => ({ id: m.id, kind: m.kind, pos: { ...m.pos }, maxHp: m.maxHp })),
   });
 
   await server.start(CHANNEL_PORT);
-  console.log(`[channel] listening on ws://localhost:${CHANNEL_PORT}`);
-  console.log(`[channel] zone ${ZONE_SIZE.x}×${ZONE_SIZE.y}, tick 20Hz`);
+  console.log(`[channel] ${def.name} (${ZONE_ID}) on ws://localhost:${CHANNEL_PORT}`);
+  console.log(`[channel] ${def.size.x}×${def.size.y}, cap ${capacity}, ${def.mobs.length} mobs, tick 20Hz`);
 
   const shutdown = async () => {
     console.log('[channel] shutting down…');
