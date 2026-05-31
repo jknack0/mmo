@@ -88,6 +88,7 @@ const MOB_SHEETS: Record<string, MobRender> = {
   ghoul: { sheet: 'mob_ghoul.png', scale: 2 },
   bonecaster: { sheet: 'mob_bonecaster_8dir.png', scale: 2 },
   cinderbat: { sheet: 'mob_cinderbat_fly_s.png', scale: 2 }, // flyer (front-facing flap)
+  cyclops: { sheet: 'boss_cyclops_s.png', scale: 2.6 }, // one-eyed stone-giant boss
 };
 
 /** Sheet + scale for a mob kind; unknown kinds fall back to the skeleton. */
