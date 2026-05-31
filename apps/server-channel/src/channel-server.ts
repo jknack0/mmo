@@ -87,12 +87,28 @@ function dist(a: Vec2, b: Vec2): number {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+/** Tick-loop timing stats for load testing (S25). */
+export interface TickStats {
+  /** Ticks executed since start. */
+  ticks: number;
+  /** Slowest single tick (ms). */
+  maxMs: number;
+  /** Mean tick duration (ms). */
+  avgMs: number;
+  /** Ticks whose work exceeded the 20Hz budget (1000/tickHz ms). */
+  missed: number;
+  /** Configured tick budget (ms). */
+  budgetMs: number;
+}
+
 export interface ChannelServer {
   start(port: number): Promise<void>;
   stop(): Promise<void>;
   address(): AddressInfo;
   /** Exposed for diagnostics / tests. */
   zoneState(): ZoneState;
+  /** Tick-loop timing since start (S25 load test). */
+  tickStats(): TickStats;
 }
 
 const DEFAULT_TICK_HZ = 20;
@@ -414,7 +430,19 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
       .catch((err) => console.error('[channel] drop mint failed:', err));
   }
 
+  // Tick timing (S25 load test).
+  let tickCount = 0, tickMaxMs = 0, tickSumMs = 0, tickMissed = 0;
   function tick(): void {
+    const t0 = performance.now();
+    tickBody();
+    const dur = performance.now() - t0;
+    tickCount++;
+    tickSumMs += dur;
+    if (dur > tickMaxMs) tickMaxMs = dur;
+    if (dur > tickMs) tickMissed++;
+  }
+
+  function tickBody(): void {
     const now = Date.now();
     // Resources advance every tick — done first so any spends inside the
     // FSM step see the updated values.
@@ -557,6 +585,15 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
 
     zoneState() {
       return zone;
+    },
+    tickStats() {
+      return {
+        ticks: tickCount,
+        maxMs: tickMaxMs,
+        avgMs: tickCount ? tickSumMs / tickCount : 0,
+        missed: tickMissed,
+        budgetMs: tickMs,
+      };
     },
   };
 }
