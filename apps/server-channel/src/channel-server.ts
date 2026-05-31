@@ -181,7 +181,7 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
     }
   }
 
-  async function handleMessage(ws: WebSocket, conn: Connection, raw: string): Promise<void> {
+  async function handleMessage(ws: WebSocket, conn: Connection, raw: Uint8Array | string): Promise<void> {
     let msg: ClientMessage;
     try {
       msg = decodeClientMessage(raw);
@@ -443,7 +443,10 @@ export function buildChannelServer(opts: ChannelServerOptions): ChannelServer {
           connections.set(ws, conn);
 
           ws.on('message', (data) => {
-            handleMessage(ws, conn, data.toString()).catch((err) =>
+            // Pass the raw frame bytes (binary wire, S23). The decoder accepts a
+            // Buffer/Uint8Array and self-describes off the magic byte.
+            const bytes = Array.isArray(data) ? Buffer.concat(data) : (data as Buffer);
+            handleMessage(ws, conn, bytes).catch((err) =>
               console.error('[channel] handler error:', err)
             );
           });

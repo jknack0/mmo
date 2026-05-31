@@ -13,13 +13,14 @@ describe('ChannelClient', () => {
   let url: string;
   // Latest connected server-side socket — tests use this to push messages.
   let serverSocket: NodeWebSocket | null = null;
-  const serverInbox: string[] = [];
+  const serverInbox: Uint8Array[] = [];
 
   beforeAll(async () => {
     wss = new WebSocketServer({ port: 0 });
     wss.on('connection', (sock) => {
       serverSocket = sock;
-      sock.on('message', (data) => serverInbox.push(data.toString()));
+      // Binary wire (S23): keep the raw frame bytes for the decoder.
+      sock.on('message', (data) => serverInbox.push(data as Uint8Array));
     });
     await new Promise<void>((resolve) => wss.once('listening', () => resolve()));
     const addr = wss.address() as AddressInfo;
