@@ -32,6 +32,7 @@ import {
   type InterpolatedMobState,
 } from '../network/snapshot-interpolator.js';
 import { tileToScreen, screenToTile, ISO_TILE_W, ISO_TILE_H } from './iso-coords.js';
+import { resolveLootClick, lootActionFor, type LootClickAction } from './loot-click.js';
 import { RIFT_T1 } from '@mmo/domain';
 import { fx, SKILL_GLYPH } from './fx.js';
 
@@ -617,6 +618,12 @@ export async function mountWorldScene(
     }
   });
 
+  /** Turn a resolved loot click into the wire message: grab in range, else walk. */
+  function dispatchLoot(action: LootClickAction): void {
+    if (action.kind === 'pickup') client.send({ type: 'pickup', itemId: action.itemId });
+    else client.send({ type: 'move', target: action.target });
+  }
+
   // ─── Input: click-to-move / click-on-mob to attack ──────────
   app.stage.eventMode = 'static';
   app.stage.hitArea = app.screen;
@@ -632,20 +639,18 @@ export async function mountWorldScene(
     ) {
       return;
     }
-    // Loot takes click priority: if a ground item is near the click, grab it.
+    // Loot takes click priority: clicking a ground item grabs it if already in
+    // range, otherwise walks toward it so the walk-over auto-pickup finishes the
+    // job (D2/PoE). A pickup sent from out of range was silently rejected by the
+    // server's proximity gate, so a bare click used to do nothing.
     {
-      let bestItem: GroundItem | null = null;
-      let bestItemDist = 1.5;
-      for (const gi of latestGroundItems) {
-        const d = Math.hypot(gi.pos.x - clicked.x, gi.pos.y - clicked.y);
-        if (d < bestItemDist) {
-          bestItemDist = d;
-          bestItem = gi;
+      const me = lastFrame.players.find((p) => p.id === myId);
+      if (me) {
+        const loot = resolveLootClick(clicked, latestGroundItems, me.pos);
+        if (loot) {
+          dispatchLoot(loot);
+          return;
         }
-      }
-      if (bestItem) {
-        client.send({ type: 'pickup', itemId: bestItem.id });
-        return;
       }
     }
     // Pick the closest alive mob within a generous tile radius. The mob's
@@ -847,7 +852,8 @@ export async function mountWorldScene(
         sprite = makeGroundSprite(gi.baseId, gi.rarity);
         sprite.on('pointerdown', (e) => {
           e.stopPropagation();
-          client.send({ type: 'pickup', itemId: gi.id });
+          const self = lastFrame.players.find((p) => p.id === myId);
+          dispatchLoot(lootActionFor(gi, self?.pos ?? gi.pos));
         });
         groundSprites.set(gi.id, sprite);
         groundLayer.addChild(sprite);

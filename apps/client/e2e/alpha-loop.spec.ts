@@ -46,6 +46,10 @@ test('canonical alpha loop: connect → walk → attack → kill → loot → eq
   expect(killedId, 'a mob should be killed within the timeout').toBeTruthy();
 
   // ── Loot: the forced drop appears on the ground; walk onto it to pick up ──
+  // (Walk-over auto-pickup. The click-to-loot path resolves to the same pickup
+  // when in range or walks the player to a far drop — see loot-click.test.ts;
+  // it can't be exercised here because a kill-drop always lands inside walk-over
+  // range, MOB_STOP_TILES 0.8 < PICKUP 1.2, so walk-over claims it first.)
   const looted = await page.evaluate(async () => {
     const api = (window as any).__mmoE2E.controls;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
