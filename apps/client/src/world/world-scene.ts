@@ -18,10 +18,13 @@ import {
   PLAYER_SHEET,
   FACING_SOUTH,
   clipFrameIndex,
+  attackDuration,
+  tryTriggerAttack,
   type ClipState,
   type SheetMeta,
 } from './asset-manifest.js';
 import type { Texture } from 'pixi.js';
+import { HOTBAR, canCast, hotbarView, type HotbarSlotView } from './hotbar.js';
 import { getItemBase, RARITY_COLOR, type Rarity } from '@mmo/domain';
 import { createChannelClient, type ChannelClient } from '../network/channel-client.js';
 import {
@@ -41,6 +44,8 @@ export interface MountWorldSceneOptions {
   onDisconnected?: () => void;
   /** Called every frame with the local player's live stats for HUD rendering. */
   onStats?: (s: LocalPlayerStats) => void;
+  /** Called every frame with the hotbar's cooldown/castability state per slot. */
+  onHotbar?: (slots: HotbarSlotView[]) => void;
   /** Called when the server confirms a loot pickup (so the bag can refresh). */
   onPickup?: (baseId: string) => void;
   /** Called when the server confirms a consumable was used (so the bag refreshes). */
@@ -66,6 +71,9 @@ export interface WorldSceneControls {
   move: (target: Vec2) => void;
   /** Engage a mob with a skill (S26 e2e driver). */
   attack: (mobId: string, skillId: string) => void;
+  /** Cast a hotbar skill (auto-targets nearest if nothing engaged). Returns
+   *  false if it was on cooldown / unaffordable / had no target. */
+  castSkill: (skillId: string) => boolean;
   /** Snapshot the live world for assertions (S26 e2e driver). */
   getState: () => {
     myId: string | null;
@@ -133,6 +141,8 @@ export async function mountWorldScene(
     state: ClipState;
     clipElapsed: number; // ms into the current clip (reset on state change)
     lastPos: Vec2;
+    /** Timestamp (performance.now) when the current attack one-shot ends; 0 = not attacking. */
+    attackUntil: number;
   }
 
   /** Advance an actor's clip by `dtMs`, pick facing from motion, set its frame. */
@@ -141,7 +151,13 @@ export async function mountWorldScene(
     const ddy = pos.y - a.lastPos.y;
     const moving = Math.abs(ddx) + Math.abs(ddy) > MOVE_EPS;
     if (moving) a.facing = facingFromDelta(ddx, ddy); // hold facing when still
-    const next: ClipState = moving ? 'move' : 'idle';
+    // Attack one-shot: holds priority for its duration, then falls back to move/idle.
+    // Position keeps updating underneath so the actor can lunge forward during the swing.
+    const now = performance.now();
+    const attacking = now < a.attackUntil;
+    const next: ClipState = attacking ? 'attack' : (moving ? 'move' : 'idle');
+    // Entering attack resets the elapsed counter so the clip plays from frame 0.
+    // Re-triggers while already attacking are ignored (attackUntil already set).
     if (next !== a.state) {
       a.state = next;
       a.clipElapsed = 0;
@@ -154,6 +170,15 @@ export async function mountWorldScene(
       ? clipFrameIndex(a.meta, a.state, a.facing, a.clipElapsed)
       : Math.min(a.facing, a.frames.length - 1); // no manifest meta → best-effort facing
     a.body.texture = a.frames[idx] ?? a.frames[0]!;
+  }
+
+  /** Trigger an actor's attack one-shot. No-op if already mid-attack or no
+   *  attack clip exists. Returns the clip duration (0 if no clip). */
+  function triggerAttack(a: AnimActor): number {
+    const now = performance.now();
+    const result = tryTriggerAttack(a.attackUntil, a.meta, now);
+    if (result.triggered) a.attackUntil = result.attackUntil;
+    return result.triggered ? attackDuration(a.meta) : 0;
   }
 
   const world = new Container();
@@ -413,6 +438,7 @@ export async function mountWorldScene(
     return {
       container, body, frames: HERO_FRAMES, meta: heroMeta,
       facing: SOUTH, state: 'idle', clipElapsed: 0, lastPos: { x: 0, y: 0 },
+      attackUntil: 0,
     };
   }
 
@@ -441,6 +467,7 @@ export async function mountWorldScene(
     return {
       container, hpBar, body, targetRing, frames: mf.frames, meta: mf.meta,
       facing: SOUTH, state: 'idle', clipElapsed: 0, lastPos: { x: 0, y: 0 },
+      attackUntil: 0,
     };
   }
 
@@ -522,6 +549,9 @@ export async function mountWorldScene(
             fx.spawnFloat(at.x, at.y - 24, `-${ev.amount}`, '#ff5a5a', true);
             if (ev.targetId === myId) shakeT = Math.max(shakeT, ev.fatal ? 0.4 : 0.12);
           }
+          // Trigger the mob's attack one-shot at the moment the hit lands.
+          const mob = mobSprites.get(ev.attackerId);
+          if (mob) triggerAttack(mob);
           break;
         }
         const target = lastMobPos.get(ev.targetId);
@@ -540,6 +570,11 @@ export async function mountWorldScene(
         }
         const glyph = SKILL_GLYPH[ev.skillId] ?? { glyph: 'orb', radius: 40 };
         const attacker = lastFrame.players.find((p) => p.id === ev.attackerId);
+        // Trigger the player's attack one-shot when a real skill lands.
+        if (attacker) {
+          const playerSprite = playerSprites.get(attacker.id);
+          if (playerSprite) triggerAttack(playerSprite);
+        }
         const from = attacker ? tileToFx(attacker.pos) : { x: to.x, y: to.y - 40 };
         fx.cast({ glyph: glyph.glyph, radius: glyph.radius ?? 50, delay: glyph.delay ?? 0.6 }, from, to, onImpact);
         break;
@@ -556,6 +591,7 @@ export async function mountWorldScene(
     useItem: (itemId: string) => client.send({ type: 'use-item', itemId }),
     move: (target: Vec2) => client.send({ type: 'move', target }),
     attack: (mobId: string, skillId: string) => client.send({ type: 'attack', targetId: mobId, skillId }),
+    castSkill: (skillId: string) => castSkill(skillId),
     getState: () => {
       const me = lastFrame.players.find((p) => p.id === myId);
       return {
@@ -643,43 +679,60 @@ export async function mountWorldScene(
   // showcases both Pyromancy sub-archetypes (burn-stacker via cinder-spray
   // → combust; direct-burst via spark / fireball / meteor / pyroclasm).
   // Configurable bindings + drag-bind UI land in S09 (#11) with tripods.
-  const SKILL_KEYBINDS: Record<string, string> = {
-    q: 'spark',
-    w: 'cinder-spray',
-    e: 'fireball',
-    r: 'pyroclasm',
-    a: 'combust',
-    s: 'meteor',
-  };
-  function castSkillByHotkey(skillId: string): void {
-    if (!myId) return;
-    const me = lastFrame.players.find((p) => p.id === myId);
-    if (!me) return;
-    let targetId = me.engagedTargetId ?? null;
-    if (!targetId) {
-      // Pick the nearest alive mob — server will reject if out of range.
-      let bestDist = Infinity;
-      for (const mob of aliveMobsByTile.values()) {
-        const dx = mob.pos.x - me.pos.x;
-        const dy = mob.pos.y - me.pos.y;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d < bestDist) {
-          bestDist = d;
-          targetId = mob.id;
-        }
+  // Client-predicted cooldowns + recent denies, keyed by skillId (ms timestamps
+  // on the performance clock). The server stays authoritative; these just drive
+  // the HUD sweep/grey-out/shake so a press never silently no-ops.
+  const cdEndsAt = new Map<string, number>();
+  const deniedAt = new Map<string, number>();
+  let liveSpirit = 0;
+  let liveWrath = 0;
+  const keyToSkill = new Map(HOTBAR.map((s) => [s.key, s.skillId]));
+
+  /** Find the nearest alive mob to the local player (auto-target). */
+  function nearestMobId(from: Vec2): string | null {
+    let best: string | null = null;
+    let bestDist = Infinity;
+    for (const mob of aliveMobsByTile.values()) {
+      const d = Math.hypot(mob.pos.x - from.x, mob.pos.y - from.y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = mob.id;
       }
     }
-    if (!targetId) return;
-    client.send({ type: 'attack', targetId, skillId });
+    return best;
   }
+
+  /**
+   * Cast a hotbar skill. Auto-targets the nearest mob when nothing is engaged;
+   * the server's sticky FSM then walks into range and fires. Returns false (and
+   * flashes the deny shake) when on cooldown, unaffordable, or no target.
+   */
+  function castSkill(skillId: string): boolean {
+    const meta = HOTBAR.find((s) => s.skillId === skillId);
+    if (!meta || !myId) return false;
+    const me = lastFrame.players.find((p) => p.id === myId);
+    const now = performance.now();
+    const deny = (): false => {
+      deniedAt.set(skillId, now);
+      return false;
+    };
+    if (!me) return deny();
+    if (!canCast(meta, cdEndsAt.get(skillId) ?? 0, liveSpirit, liveWrath, now)) return deny();
+    const targetId = me.engagedTargetId ?? nearestMobId(me.pos);
+    if (!targetId) return deny(); // nothing to hit
+    cdEndsAt.set(skillId, now + meta.cooldownMs); // optimistic — server is authoritative
+    client.send({ type: 'attack', targetId, skillId });
+    return true;
+  }
+
   function onKeyDown(e: KeyboardEvent): void {
     if (e.code === 'Space') {
       e.preventDefault();
       client.send({ type: 'dodge' });
       return;
     }
-    const skill = SKILL_KEYBINDS[e.key.toLowerCase()];
-    if (skill) castSkillByHotkey(skill);
+    const skill = keyToSkill.get(e.key.toLowerCase());
+    if (skill) castSkill(skill);
   }
   window.addEventListener('keydown', onKeyDown);
 
@@ -697,6 +750,8 @@ export async function mountWorldScene(
     if (myId) {
       const meP = frame.players.find((p) => p.id === myId);
       if (meP) {
+        liveSpirit = meP.spirit;
+        liveWrath = meP.wrath;
         opts.onStats?.({
           spirit: meP.spirit,
           maxSpirit: meP.maxSpirit,
@@ -710,6 +765,9 @@ export async function mountWorldScene(
         wasDead = meP.dead;
       }
     }
+    // Push the hotbar's live cooldown/castability to the HUD every frame so the
+    // sweep animates and grey-out/deny react instantly to the keypress + regen.
+    opts.onHotbar?.(hotbarView(cdEndsAt, deniedAt, liveSpirit, liveWrath, performance.now()));
 
     // Players
     const seenP = new Set<string>();

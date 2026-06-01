@@ -43,7 +43,7 @@
     },
     "mob_skeleton_base.png": {
       "cols": 4,
-      "rows": 16,
+      "rows": 24,
       "cellW": 16,
       "cellH": 19,
       "frames": [
@@ -71,13 +71,18 @@
           "frames": 4,
           "fps": 8,
           "row": 8
+        },
+        "attack": {
+          "frames": 4,
+          "fps": 12,
+          "row": 16
         }
       },
-      "note": "basic skeleton. idle(2)+move(4) x 8 facings, clip sheet. 'skeleton-lord' = this sheet at higher renderScale; 'burning' = + animated flame overlay (fx, procedural)."
+      "note": "basic skeleton. idle(2)+move(4)+attack(4) x 8 facings, clip sheet. 'skeleton-lord' = this sheet at higher renderScale; 'burning' = + animated flame overlay (fx, procedural)."
     },
     "mob_ghoul.png": {
       "cols": 4,
-      "rows": 16,
+      "rows": 24,
       "cellW": 16,
       "cellH": 19,
       "frames": [
@@ -105,13 +110,18 @@
           "frames": 4,
           "fps": 8,
           "row": 8
+        },
+        "attack": {
+          "frames": 4,
+          "fps": 12,
+          "row": 16
         }
       },
       "note": "skeleton re-skinned to rotting-green (recolor of mob_skeleton_base). Same clip layout, animates identically."
     },
     "mob_bonecaster_8dir.png": {
-      "cols": 8,
-      "rows": 1,
+      "cols": 4,
+      "rows": 24,
       "cellW": 16,
       "cellH": 21,
       "frames": [
@@ -129,7 +139,24 @@
         0.95
       ],
       "renderScale": 2,
-      "note": "ranged skull-mage. Necrotic orb hidden on n/ne/nw."
+      "clips": {
+        "idle": {
+          "frames": 2,
+          "fps": 3,
+          "row": 0
+        },
+        "move": {
+          "frames": 4,
+          "fps": 8,
+          "row": 8
+        },
+        "attack": {
+          "frames": 4,
+          "fps": 12,
+          "row": 16
+        }
+      },
+      "note": "ranged skull-mage. idle(2)+move(4)+attack(4) x 8 facings. Necrotic orb hidden on n/ne/nw."
     },
     "fx_veilwisp.png": {
       "cols": 2,
@@ -185,39 +212,67 @@
     },
     "mob_cinderbat_fly_s.png": {
       "cols": 4,
-      "rows": 1,
+      "rows": 3,
       "cellW": 16,
       "cellH": 16,
       "frames": [
-        "fly_a",
-        "fly_b",
-        "fly_c",
-        "fly_d"
+        "s"
       ],
       "anchor": [
         0.5,
         0.95
       ],
       "renderScale": 2,
-      "fps": 9,
-      "note": "flying undead trash mob, front (s) facing, 4-frame wing-flap."
+      "clips": {
+        "idle": {
+          "frames": 2,
+          "fps": 3,
+          "row": 0
+        },
+        "move": {
+          "frames": 4,
+          "fps": 8,
+          "row": 1
+        },
+        "attack": {
+          "frames": 4,
+          "fps": 12,
+          "row": 2
+        }
+      },
+      "note": "flying undead trash mob, front (s) facing. idle(hover)+move(flap)+attack(dive) single-facing clips."
     },
     "boss_cyclops_s.png": {
-      "cols": 2,
-      "rows": 1,
+      "cols": 4,
+      "rows": 3,
       "cellW": 24,
       "cellH": 28,
       "frames": [
-        "idle_a",
-        "idle_b"
+        "s"
       ],
       "anchor": [
         0.5,
         0.95
       ],
       "renderScale": 2,
-      "fps": 3,
-      "note": "cyclops boss \u2014 one-eyed stone giant, front (s) facing, 2-frame idle breathe."
+      "clips": {
+        "idle": {
+          "frames": 2,
+          "fps": 3,
+          "row": 0
+        },
+        "move": {
+          "frames": 4,
+          "fps": 8,
+          "row": 1
+        },
+        "attack": {
+          "frames": 4,
+          "fps": 12,
+          "row": 2
+        }
+      },
+      "note": "cyclops boss \u2014 one-eyed stone giant, front (s) facing. idle(breathe)+move(lumber)+attack(slam) single-facing clips."
     }
   },
   "procedural": {
