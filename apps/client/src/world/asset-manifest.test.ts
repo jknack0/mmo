@@ -8,6 +8,8 @@ import {
   isDirectionalSheet,
   animFrameIndex,
   clipFrameIndex,
+  attackDuration,
+  tryTriggerAttack,
   DIR_FRAMES,
   FACING_SOUTH,
   PLAYER_SHEET,
@@ -147,5 +149,75 @@ describe('clip-aware frame selection (idle/move/attack)', () => {
     expect(clipFrameIndex(legacyLoop, 'idle', FACING_SOUTH, 0)).toBe(0);
     expect(clipFrameIndex(legacyLoop, 'idle', FACING_SOUTH, 170)).toBe(1); // 6fps → frame 1
     expect(clipFrameIndex(m.sheets['icon_skills.png']!, 'idle', 0, 500)).toBe(0); // no fps → static
+  });
+});
+
+describe('attack one-shot helpers (pure)', () => {
+  const m = parseManifest(RAW);
+  const clip = m.sheets['mob_skeleton_base_clips.png']!;  // no attack clip
+  const legacy = m.sheets['mob_skeleton_base.png']!;       // no clips at all
+
+  // A mock meta with an attack clip (4 frames @ 12fps = 333ms).
+  const withAttack = {
+    key: 'test', cols: 4, rows: 24, cellW: 16, cellH: 19,
+    frames: [...DIR_FRAMES], anchor: [0.5, 0.95] as [number, number], renderScale: 2,
+    clips: { attack: { frames: 4, fps: 12, row: 16 } },
+  };
+
+  it('attackDuration returns ms from clip meta, 0 when absent', () => {
+    expect(attackDuration(withAttack)).toBeCloseTo(333, -1); // 4/12*1000 = 333ms
+    expect(attackDuration(clip)).toBe(0); // no attack clip
+    expect(attackDuration(legacy)).toBe(0); // no clips at all
+    expect(attackDuration(undefined)).toBe(0);
+  });
+
+  it('tryTriggerAttack sets attackUntil when a clip exists and actor is not attacking', () => {
+    const now = 5000;
+    const result = tryTriggerAttack(0, withAttack, now);
+    expect(result.triggered).toBe(true);
+    expect(result.attackUntil).toBeGreaterThan(now);
+    expect(result.attackUntil).toBeCloseTo(now + 333, -1);
+  });
+
+  it('tryTriggerAttack ignores re-trigger while already mid-attack', () => {
+    const now = 5000;
+    const midAttack = now + 200; // 200ms left on current attack
+    const result = tryTriggerAttack(midAttack, withAttack, now);
+    expect(result.triggered).toBe(false);
+    expect(result.attackUntil).toBe(midAttack); // unchanged
+  });
+
+  it('tryTriggerAttack returns false (no-op) when the actor has no attack clip', () => {
+    const now = 5000;
+    expect(tryTriggerAttack(0, clip, now).triggered).toBe(false);
+    expect(tryTriggerAttack(0, legacy, now).triggered).toBe(false);
+    expect(tryTriggerAttack(0, null, now).triggered).toBe(false);
+    expect(tryTriggerAttack(0, undefined, now).triggered).toBe(false);
+  });
+
+  it('tryTriggerAttack re-triggers after the previous attack ends', () => {
+    const now = 5000;
+    const prevAttackEnded = now - 1; // ended just before now
+    const result = tryTriggerAttack(prevAttackEnded, withAttack, now);
+    expect(result.triggered).toBe(true);
+    expect(result.attackUntil).toBeCloseTo(now + 333, -1);
+  });
+
+  it('clipFrameIndex uses facing 0 for single-facing clip sheets', () => {
+    // Simulate a front-only flyer: frames=['s'], clips on single-row blocks.
+    const singleFacing = {
+      key: 'flyer', cols: 4, rows: 3, cellW: 16, cellH: 16,
+      frames: ['s'], anchor: [0.5, 0.95] as [number, number], renderScale: 2,
+      clips: {
+        idle: { frames: 2, fps: 3, row: 0 },
+        move: { frames: 4, fps: 8, row: 1 },
+        attack: { frames: 4, fps: 12, row: 2 },
+      },
+    };
+    // cols=4. Facing=south=2, but since frames.length < 8, rf=0.
+    // So row = clip.row + 0 = clip.row.
+    expect(clipFrameIndex(singleFacing, 'idle', 2, 0)).toBe(0);     // (0+0)*4+0
+    expect(clipFrameIndex(singleFacing, 'move', 5, 130)).toBe(5);    // (1+0)*4+1
+    expect(clipFrameIndex(singleFacing, 'attack', 7, 0)).toBe(8);    // (2+0)*4+0
   });
 });

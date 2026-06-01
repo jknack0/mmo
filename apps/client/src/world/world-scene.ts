@@ -18,6 +18,8 @@ import {
   PLAYER_SHEET,
   FACING_SOUTH,
   clipFrameIndex,
+  attackDuration,
+  tryTriggerAttack,
   type ClipState,
   type SheetMeta,
 } from './asset-manifest.js';
@@ -139,6 +141,8 @@ export async function mountWorldScene(
     state: ClipState;
     clipElapsed: number; // ms into the current clip (reset on state change)
     lastPos: Vec2;
+    /** Timestamp (performance.now) when the current attack one-shot ends; 0 = not attacking. */
+    attackUntil: number;
   }
 
   /** Advance an actor's clip by `dtMs`, pick facing from motion, set its frame. */
@@ -147,7 +151,13 @@ export async function mountWorldScene(
     const ddy = pos.y - a.lastPos.y;
     const moving = Math.abs(ddx) + Math.abs(ddy) > MOVE_EPS;
     if (moving) a.facing = facingFromDelta(ddx, ddy); // hold facing when still
-    const next: ClipState = moving ? 'move' : 'idle';
+    // Attack one-shot: holds priority for its duration, then falls back to move/idle.
+    // Position keeps updating underneath so the actor can lunge forward during the swing.
+    const now = performance.now();
+    const attacking = now < a.attackUntil;
+    const next: ClipState = attacking ? 'attack' : (moving ? 'move' : 'idle');
+    // Entering attack resets the elapsed counter so the clip plays from frame 0.
+    // Re-triggers while already attacking are ignored (attackUntil already set).
     if (next !== a.state) {
       a.state = next;
       a.clipElapsed = 0;
@@ -160,6 +170,15 @@ export async function mountWorldScene(
       ? clipFrameIndex(a.meta, a.state, a.facing, a.clipElapsed)
       : Math.min(a.facing, a.frames.length - 1); // no manifest meta → best-effort facing
     a.body.texture = a.frames[idx] ?? a.frames[0]!;
+  }
+
+  /** Trigger an actor's attack one-shot. No-op if already mid-attack or no
+   *  attack clip exists. Returns the clip duration (0 if no clip). */
+  function triggerAttack(a: AnimActor): number {
+    const now = performance.now();
+    const result = tryTriggerAttack(a.attackUntil, a.meta, now);
+    if (result.triggered) a.attackUntil = result.attackUntil;
+    return result.triggered ? attackDuration(a.meta) : 0;
   }
 
   const world = new Container();
@@ -419,6 +438,7 @@ export async function mountWorldScene(
     return {
       container, body, frames: HERO_FRAMES, meta: heroMeta,
       facing: SOUTH, state: 'idle', clipElapsed: 0, lastPos: { x: 0, y: 0 },
+      attackUntil: 0,
     };
   }
 
@@ -447,6 +467,7 @@ export async function mountWorldScene(
     return {
       container, hpBar, body, targetRing, frames: mf.frames, meta: mf.meta,
       facing: SOUTH, state: 'idle', clipElapsed: 0, lastPos: { x: 0, y: 0 },
+      attackUntil: 0,
     };
   }
 
@@ -528,6 +549,9 @@ export async function mountWorldScene(
             fx.spawnFloat(at.x, at.y - 24, `-${ev.amount}`, '#ff5a5a', true);
             if (ev.targetId === myId) shakeT = Math.max(shakeT, ev.fatal ? 0.4 : 0.12);
           }
+          // Trigger the mob's attack one-shot at the moment the hit lands.
+          const mob = mobSprites.get(ev.attackerId);
+          if (mob) triggerAttack(mob);
           break;
         }
         const target = lastMobPos.get(ev.targetId);
@@ -546,6 +570,11 @@ export async function mountWorldScene(
         }
         const glyph = SKILL_GLYPH[ev.skillId] ?? { glyph: 'orb', radius: 40 };
         const attacker = lastFrame.players.find((p) => p.id === ev.attackerId);
+        // Trigger the player's attack one-shot when a real skill lands.
+        if (attacker) {
+          const playerSprite = playerSprites.get(attacker.id);
+          if (playerSprite) triggerAttack(playerSprite);
+        }
         const from = attacker ? tileToFx(attacker.pos) : { x: to.x, y: to.y - 40 };
         fx.cast({ glyph: glyph.glyph, radius: glyph.radius ?? 50, delay: glyph.delay ?? 0.6 }, from, to, onImpact);
         break;

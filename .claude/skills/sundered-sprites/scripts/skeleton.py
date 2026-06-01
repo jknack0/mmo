@@ -66,18 +66,20 @@ def ribcage(g, view, oy):
         g.put(CX + reach - 1, y, SH); g.put(CX + (reach - 2 if reach > 1 else 0), y, BONE)
 
 
-def arms(g, view, oy, swing):
-    """Two arms (front/back) or one forward + one shadowed (side)."""
+def arms(g, view, oy, swing, attack_reach=0):
+    """Two arms (front/back) or one forward + one shadowed (side).
+    swing in [-4,4]: negative = near hand lifts (wind-up), positive = drops.
+    attack_reach > 0 extends the near hand forward for striking poses."""
     sh_y = 7 + oy
-    near_h = sh_y + 4 + max(0, int(round(swing)))   # near hand swings down
-    far_h = sh_y + 4 - max(0, int(round(swing)))
+    near_h = sh_y + 4 - int(round(swing))   # swing≤0 lifts, swing≥0 drops
+    far_h = sh_y + 4 + int(round(swing))
     if view in ("s", "n", "se", "ne"):
         lx, rx = CX - 3, CX + 3
         g.line(lx, sh_y, lx, far_h, BONE)
         g.line(rx, sh_y, rx, near_h, SH if view in ("n",) else BONE)
         g.put(lx, far_h, HI); g.put(rx, near_h, SH)
     else:  # e: front arm (screen-right) swings, back arm hinted
-        fx = CX + 2
+        fx = CX + 2 + attack_reach
         g.line(fx, sh_y, fx, near_h, BONE); g.put(fx, near_h, HI)
         g.line(CX - 1, sh_y, CX - 1, sh_y + 4, SH)
 
@@ -104,11 +106,11 @@ def legs(g, view, oy, stride):
         g.line(rx, hip, rx + abs(s), rl, BONE); g.put(rx + abs(s), rl, INK)
 
 
-def pose(view, stride=0.0, swing=0.0, bob=0):
+def pose(view, stride=0.0, swing=0.0, bob=0, attack_reach=0):
     g = sk.Grid(W, H)
     legs(g, view, bob, stride)
     ribcage(g, view, bob)
-    arms(g, view, bob, swing)
+    arms(g, view, bob, swing, attack_reach)
     skull(g, view, bob)
     g.outline(INK)
     return g.image()
@@ -119,9 +121,14 @@ def pose(view, stride=0.0, swing=0.0, bob=0):
 IDLE = [dict(bob=0, swing=0.0, stride=0.0),
         dict(bob=1, swing=0.0, stride=0.0)]
 MOVE = [dict(bob=-1, swing=0.0, stride=0.0),   # passing (up)
-        dict(bob=0,  swing=1.0, stride=1.0),    # left/front contact
+        dict(bob=0,  swing=-1.0, stride=1.0),   # left/front contact
         dict(bob=-1, swing=0.0, stride=0.0),    # passing (up)
-        dict(bob=0,  swing=-1.0, stride=-1.0)]  # right/back contact
+        dict(bob=0,  swing=1.0, stride=-1.0)]   # right/back contact
+# attack: 4-frame claw swipe (12fps). Wind-up → strike → follow → recover.
+ATTACK = [dict(bob=-1, swing=-3.0, stride=-0.5, attack_reach=1),   # wind-up
+          dict(bob=-2, swing=-4.0, stride=1.0, attack_reach=3),     # strike
+          dict(bob=-1, swing=-2.0, stride=0.5, attack_reach=4),     # follow-thru
+          dict(bob=0,  swing=1.0, stride=0.0, attack_reach=1)]      # recover
 
 AUTHOR = {"e": "e", "se": "se", "s": "s", "n": "n", "ne": "ne"}
 MIRROR = {"sw": "se", "w": "e", "nw": "ne"}     # horizontal mirrors
@@ -135,7 +142,7 @@ def facing_frames(facing, clip):
 
 
 # ── Assemble the sheet: rows = (idle 8 facings) then (move 8 facings) ──
-COLS = max(len(IDLE), len(MOVE))
+COLS = max(len(IDLE), len(MOVE), len(ATTACK))
 
 
 def pad(frames):
@@ -144,7 +151,7 @@ def pad(frames):
 
 
 rows = []
-for clip in (IDLE, MOVE):
+for clip in (IDLE, MOVE, ATTACK):
     for facing in sk.DIR_FRAMES:
         rows.append(pad(facing_frames(facing, clip)))
 
@@ -153,5 +160,7 @@ sheet = sk.save_sheet(rows, os.path.join(OUT, "mob_skeleton_base.png"))
 sk.save_preview(sheet, os.path.join(OUT, "skeleton_sheet_preview.png"), scale=8)
 sk.save_gif(facing_frames("s", MOVE), os.path.join(OUT, "skeleton_walk_s.gif"), fps=8)
 sk.save_gif(facing_frames("e", MOVE), os.path.join(OUT, "skeleton_walk_e.gif"), fps=8)
+sk.save_gif(facing_frames("s", ATTACK), os.path.join(OUT, "skeleton_attack_s.gif"), fps=12)
+sk.save_gif(facing_frames("e", ATTACK), os.path.join(OUT, "skeleton_attack_e.gif"), fps=12)
 print(f"skeleton: wrote mob_skeleton_base.png ({sheet.size[0]}x{sheet.size[1]}) "
-      f"= idle(2) + move(4) x 8 facings (+ preview, gifs)")
+      f"= idle(2) + move(4) + attack(4) x 8 facings (+ preview, gifs)")

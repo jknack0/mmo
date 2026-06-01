@@ -173,7 +173,11 @@ export function clipFrameIndex(
   const f = Math.min(Math.max(facing, 0), 7);
   const clip = meta.clips?.[state] ?? meta.clips?.idle;
   if (clip) {
-    return (clip.row + f) * meta.cols + loopFrame(clip.fps, clip.frames, elapsedMs);
+    // Clip sheets use facing as a row offset within the 8-facing block.
+    // Single-facing sheets (frames.length < 8, e.g. a front-only flyer) use
+    // facing 0 so the single row matches every facing direction.
+    const rf = meta.frames.length >= 8 ? f : 0;
+    return (clip.row + rf) * meta.cols + loopFrame(clip.fps, clip.frames, elapsedMs);
   }
   // Legacy sheets: 8-dir picks the facing frame; everything else time-loops.
   if (isDirectionalSheet(meta)) return Math.min(f, meta.frames.length - 1);
@@ -203,4 +207,28 @@ export const ICON_SHEET = 'icon_skills.png';
 /** Every sheet a mob kind can reference — for preloading. */
 export function allMobSheets(): string[] {
   return [...new Set(Object.values(MOB_SHEETS).map((m) => m.sheet))];
+}
+
+// ─── Attack one-shot helpers (pure, unit-testable) ───────────────
+
+/** Duration of an attack clip in ms. Returns 0 if the actor has no attack
+ *  clip or its fps/frames are degenerate. */
+export function attackDuration(meta?: SheetMeta): number {
+  const clip = meta?.clips?.attack;
+  if (!clip || clip.fps <= 0 || clip.frames <= 0) return 0;
+  return (clip.frames / clip.fps) * 1000;
+}
+
+/** Try to start an attack one-shot. Pure: returns the new `attackUntil`
+ *  timestamp (unchanged if already attacking or no clip exists) and whether
+ *  the attack was freshly triggered. */
+export function tryTriggerAttack(
+  attackUntil: number,
+  meta: SheetMeta | undefined | null,
+  now: number
+): { attackUntil: number; triggered: boolean } {
+  if (now < attackUntil) return { attackUntil, triggered: false }; // already attacking
+  const dur = attackDuration(meta ?? undefined);
+  if (dur <= 0) return { attackUntil, triggered: false }; // no clip
+  return { attackUntil: now + dur, triggered: true };
 }
