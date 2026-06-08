@@ -20,3 +20,6 @@ coverage/
 .claude/skills/**/.venv/
 __pycache__/
 *.pyc
+
+# Local agent tooling (Paseo) — not project content
+.agents/
